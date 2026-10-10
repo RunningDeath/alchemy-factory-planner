@@ -3,7 +3,8 @@ import { calculateProductionLP } from "../lp-planner";
 import { analyzeBelts } from "../belt-analysis";
 import { PlannerConfig } from "../types";
 import { beltPieceFor } from "./belt-pieces";
-import { DEFAULT_MODULE_OPTIONS, generateModule, type GeneratedModule, type ModuleStep } from "./generator";
+import { getFootprint } from "./footprint";
+import { DEFAULT_MODULE_OPTIONS, generateModule, machineRotation, stackingFor, type GeneratedModule, type ModuleStep } from "./generator";
 import { portConnections, validateLayout } from "./layout";
 import { stepsFromReport } from "./module-steps";
 
@@ -82,27 +83,40 @@ describe("generateModule", () => {
     expect(mod.placements.some((p) => p.id === "frame-single")).toBe(true);
   });
 
-  test("steps stack as tiers on wooden floors", () => {
+  test("steps sit side by side on the ground; nurseries stack on metal stands; one storey high", () => {
     const mod = generateModule(
       [
-        step({ nodeKey: "a", deviceId: "nursery", machines: 4, inputs: [{ itemName: "Growth Potion", perMachineRate: 1 }], outputs: [{ itemName: "Flax", perMachineRate: 165 }] }),
+        step({ nodeKey: "a", deviceId: "nursery", machines: 8, inputs: [{ itemName: "Growth Potion", perMachineRate: 1 }], outputs: [{ itemName: "Flax", perMachineRate: 165 }] }),
         step({ nodeKey: "b", machines: 3, inputs: [{ itemName: "Flax Fiber", perMachineRate: 30 }], outputs: [{ itemName: "Linen", perMachineRate: 10 }] }),
       ],
       options,
     );
-    // Each nursery fills a belt, so it gets its own output lane: 3 fit in 16 cells, the 4th goes up a tier
-    expect(mod.tiers.map((t) => t.nodeKey)).toEqual(["a", "a", "b"]);
+    expect(mod.tiers.every((t) => t.z === 0)).toBe(true);
+    expect(mod.size[2]).toBeLessThanOrEqual(16);
+    expect(mod.placements.some((p) => p.id.startsWith("construct-floor"))).toBe(false);
+    const nurseries = mod.tiers.filter((t) => t.nodeKey === "a");
+    expect(nurseries.some((t) => t.stacking === "metal-stand" && t.levels > 1)).toBe(true);
     expect(mod.tiers.every((t) => t.lanes.every((l) => !l.overBelt))).toBe(true);
-    expect(mod.tiers[1].z).toBeGreaterThan(mod.tiers[0].z + mod.tiers[0].height);
-    expect(mod.placements.some((p) => p.id === "construct-floor-wood-8x8")).toBe(true);
     expect(validateLayout(mod.placements)).toEqual([]);
     expect(unconnectedMachinePorts(mod)).toEqual([]);
   });
 
-  test("too many machines for one tier spill into more tiers", () => {
+  test("assemblers stack on metal stands, with belts carried on every level", () => {
+    const fp = getFootprint("assembler")!;
+    expect(stackingFor(fp, machineRotation(fp))).toMatchObject({ kind: "metal-stand", pitch: 3 });
+    const mod = generateModule(
+      [step({ machines: 12, inputs: [{ itemName: "A", perMachineRate: 20 }], outputs: [{ itemName: "B", perMachineRate: 10 }] })],
+      { ...options, maxWidth: 10, maxDepth: 10 },
+    );
+    expect(mod.tiers.some((t) => t.levels > 1)).toBe(true);
+    expect(validateLayout(mod.placements)).toEqual([]);
+    expect(unconnectedMachinePorts(mod)).toEqual([]);
+  });
+
+  test("too many machines for one block spill into more blocks", () => {
     const mod = generateModule(
       [step({ machines: 40, inputs: [{ itemName: "X", perMachineRate: 5 }], outputs: [{ itemName: "Y", perMachineRate: 5 }] })],
-      { ...options, maxWidth: 10, maxDepth: 10 },
+      { ...options, maxWidth: 10, maxDepth: 10, maxStack: 1 },
     );
     expect(mod.tiers.length).toBeGreaterThan(1);
     expect(mod.tiers.reduce((s, t) => s + t.machines, 0)).toBe(40);
@@ -112,7 +126,7 @@ describe("generateModule", () => {
 });
 
 describe("stepsFromReport → generateModule", () => {
-  test("Bandage 30/min: one tier per step, raw side first, valid layout", () => {
+  test("Bandage 30/min: raw side first, valid layout within one storey", () => {
     const cfg: PlannerConfig = {
       targets: [{ item: "Bandage", rate: 30 }],
       availableResources: [],
@@ -137,6 +151,8 @@ describe("stepsFromReport → generateModule", () => {
 
     const mod = generateModule(steps, { ...options, beltSpeed: report.beltSpeed });
     expect(validateLayout(mod.placements)).toEqual([]);
+    expect(unconnectedMachinePorts(mod)).toEqual([]);
+    expect(mod.size[2]).toBeLessThanOrEqual(16);
     const grinders = mod.placements.filter((p) => p.id === "grinder").length;
     expect(grinders).toBe(steps.filter((s) => s.deviceId === "grinder").reduce((sum, s) => sum + s.machines, 0));
   });

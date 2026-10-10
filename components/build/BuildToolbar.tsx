@@ -59,9 +59,10 @@ export function BuildToolbar(props: BuildToolbarProps) {
             <button onClick={props.onGenerate} disabled={!props.canGenerate} className={cn(buttonClass, "text-[var(--accent-gold)] border-[var(--accent-gold-dim)]")} title="Lay out every machine of the plan as a stacked module">
                 <Sparkles size={12} /> Generate module
             </button>
-            <NumberField label="Max W" value={options.maxWidth} min={4} max={64} title="Widest a tier may get, in cells (a wooden floor is 16)" onChange={(maxWidth) => onOptionsChange({ ...options, maxWidth })} />
-            <NumberField label="Max D" value={options.maxDepth} min={4} max={64} title="Deepest a tier may get, in cells" onChange={(maxDepth) => onOptionsChange({ ...options, maxDepth })} />
-            <NumberField label="Stack" value={options.maxStack} min={1} max={8} title="How high stackable machines (grinders, …) may be stacked" onChange={(maxStack) => onOptionsChange({ ...options, maxStack })} />
+            <NumberField label="Max W" value={options.maxWidth} min={4} max={64} title="Module width in cells; blocks wrap into a new row past this (a wooden floor is 16)" onChange={(maxWidth) => onOptionsChange({ ...options, maxWidth })} />
+            <NumberField label="Max D" value={options.maxDepth} min={4} max={64} title="Deepest a block may get, in cells" onChange={(maxDepth) => onOptionsChange({ ...options, maxDepth })} />
+            <NumberField label="Max H" value={options.maxHeight} min={3} max={64} title="Module height in cells (one storey = 16)" onChange={(maxHeight) => onOptionsChange({ ...options, maxHeight })} />
+            <NumberField label="Levels" value={options.maxStack} min={1} max={16} title="Most machine levels per block (stacked directly or on metal stands)" onChange={(maxStack) => onOptionsChange({ ...options, maxStack })} />
 
             <span className="w-px h-6 bg-[var(--border)] mx-1" />
 

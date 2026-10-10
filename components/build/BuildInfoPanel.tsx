@@ -79,20 +79,19 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onG
 
             {tiers.length > 0 && (
                 <section className="flex flex-col gap-2">
-                    <h4 className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Tiers (bottom → top)</h4>
+                    <h4 className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Blocks</h4>
                     {tiers.map((t) => (
                         <div key={t.index} className="flex flex-col gap-0.5 border-l-2 border-[var(--accent-gold-dim)] pl-2">
                             <button onClick={() => onGoToLevel(t.z)} className="text-left cursor-pointer hover:underline">
                                 <span className="font-semibold text-[var(--text-primary)]">{t.itemName}</span>{" "}
                                 <span className="text-[var(--text-muted)]">
-                                    · {t.machines}× {buildingName(t.deviceId)} · level {t.z}
-                                    {t.height > 1 ? `–${t.z + t.height - 1}` : ""} · {t.width}×{t.depth}
-                                    {t.levels > 1 ? ` · stacked ${t.levels} high` : ""}
+                                    · {t.machines}× {buildingName(t.deviceId)} · at {t.x ?? 0},{t.y ?? 0} · {t.width}×{t.depth}×{t.height}
+                                    {t.levels > 1 ? ` · ${t.levels} levels ${t.stacking === "metal-stand" ? "on metal stands" : "stacked"}` : ""}
                                 </span>
                             </button>
                             {t.lanes.map((lane, i) => (
                                 <span key={i} className={lane.overBelt ? "text-[var(--error)]" : "text-[var(--text-secondary)]"}>
-                                    {lane.kind === "in" ? "↓ in" : "↓ out"} x={lane.x}
+                                    {lane.kind === "in" ? "↓ in" : "↓ out"} x={(t.x ?? 0) + lane.x}
                                     {t.levels > 1 ? ` (level ${lane.z})` : ""}: {formatRate(lane.rate)}/m{" "}
                                     <span className="text-[var(--text-muted)]">
                                         {lane.items.map((f) => f.itemName).join(" + ")}
@@ -107,8 +106,8 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onG
                         </div>
                     ))}
                     <p className="text-[var(--text-muted)]">
-                        Input lanes enter at the top edge, output lanes leave at the bottom edge. Connect the tiers with
-                        lifts.
+                        Input lanes enter at the top edge of each block, output lanes leave at the bottom edge. Connect the
+                        blocks with belts (and lifts for upper levels).
                     </p>
                 </section>
             )}

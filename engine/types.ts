@@ -148,7 +148,7 @@ export type ViewMode = "graph" | "list" | "build";
 export interface BuildLayoutState {
   placements: Placement[];
   /** Generator settings last used for this factory */
-  options?: { maxWidth: number; maxDepth: number; maxStack: number };
+  options?: { maxWidth: number; maxDepth: number; maxStack: number; maxHeight?: number };
   /** Tiers and lanes of the last generated module */
   tiers?: TierInfo[];
 }

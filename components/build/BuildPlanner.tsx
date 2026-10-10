@@ -23,7 +23,7 @@ export function BuildPlanner() {
 
     const layout = factory?.buildLayout;
     const placements = layout?.placements ?? EMPTY;
-    const options = layout?.options ?? DEFAULT_MODULE_OPTIONS;
+    const options = useMemo(() => ({ ...DEFAULT_MODULE_OPTIONS, ...layout?.options }), [layout?.options]);
     const report = factory?.beltReport ?? null;
 
     const [tool, setTool] = useState<BuildTool | null>(null);
