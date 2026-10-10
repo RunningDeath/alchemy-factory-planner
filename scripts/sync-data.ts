@@ -6,6 +6,7 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { BUILDING_ID_OVERRIDES, pascalToKebab } from './building-ids';
 
 const REMOTE_BASE_URL = 'https://raw.githubusercontent.com/faultyd3v/AlchemyFactoryData/main';
 const DATA_DIR = './data';
@@ -109,23 +110,6 @@ async function fetchJSON<T>(filename: string): Promise<T> {
   }
   return response.json();
 }
-
-function pascalToKebab(str: string): string {
-  return str
-    .replace(/_/g, '-')  // Replace underscores with hyphens first
-    .replace(/([A-Z])/g, '-$1')
-    .toLowerCase()
-    .replace(/^-/, '')
-    .replace(/--+/g, '-');  // Replace multiple hyphens with single hyphen
-}
-
-// Special building ID mappings (remote ID → local ID)
-const BUILDING_ID_OVERRIDES: Record<string, string> = {
-  'auto-nursery': 'nursery',
-  'portal-alch-guild': 'purchasing-portal',
-  'portal-bank': 'bank-portal',
-  'portal-wholesaling': 'dispatch-portal',
-};
 
 // Craft type to device name mapping (from machine_types.json in AlchemyFactoryData)
 // Device names use kebab-case to match device IDs in devices.json
