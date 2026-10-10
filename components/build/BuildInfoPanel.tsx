@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { TierInfo } from "../../engine/build/generator";
+import type { IoPoint, RouteResult } from "../../engine/build/router";
 import { billOfMaterials, countBuildings, layoutBounds, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
 import { buildingName, isMachine, itemDisplayName } from "../../lib/buildCatalog";
 import { formatRate } from "../../lib/beltDisplay";
@@ -11,6 +12,8 @@ interface BuildInfoPanelProps {
     issues: LayoutIssue[];
     ports: PortStatus[];
     tiers: TierInfo[];
+    routes: RouteResult[];
+    io: IoPoint[];
     onSelect: (uid: string) => void;
     onGoToLevel: (z: number) => void;
 }
@@ -22,7 +25,7 @@ const ISSUE_TEXT: Record<LayoutIssue["kind"], string> = {
     unknown: "unknown building",
 };
 
-export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onGoToLevel }: BuildInfoPanelProps) {
+export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, onSelect, onGoToLevel }: BuildInfoPanelProps) {
     const byUid = useMemo(() => new Map(placements.map((p) => [p.uid, p])), [placements]);
     const bounds = useMemo(() => layoutBounds(placements), [placements]);
     const bill = useMemo(() => [...billOfMaterials(placements).entries()].sort((a, b) => b[1] - a[1]), [placements]);
@@ -76,6 +79,8 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onG
                     </p>
                 )}
             </section>
+
+            {routes.length > 0 && <ConnectionsSection routes={routes} io={io} />}
 
             {tiers.length > 0 && (
                 <section className="flex flex-col gap-2">
@@ -136,5 +141,54 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onG
                 </section>
             )}
         </div>
+    );
+}
+
+/** Belt connections between blocks, plus where items enter and leave the module */
+function ConnectionsSection({ routes, io }: { routes: RouteResult[]; io: IoPoint[] }) {
+    const failed = routes.filter((r) => !r.ok);
+    // Group block-to-block connections by item and direction for a compact overview
+    const groups = new Map<string, { itemName: string; from: string; to: string; rate: number; count: number }>();
+    for (const r of routes) {
+        if (!r.ok || r.from.includes("module edge") || r.to.includes("module edge")) continue;
+        const key = `${r.itemName}|${r.from}|${r.to}`;
+        const g = groups.get(key) ?? { itemName: r.itemName, from: r.from, to: r.to, rate: 0, count: 0 };
+        g.rate += r.rate;
+        g.count++;
+        groups.set(key, g);
+    }
+    const sum = (kind: IoPoint["kind"]) => {
+        const totals = new Map<string, number>();
+        io.filter((p) => p.kind === kind).forEach((p) => totals.set(p.itemName, (totals.get(p.itemName) ?? 0) + p.rate));
+        return [...totals.entries()];
+    };
+    return (
+        <section className="flex flex-col gap-1">
+            <h4 className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Connections</h4>
+            <p className={failed.length ? "text-[var(--warning)]" : "text-[var(--success)]"}>
+                {routes.length - failed.length} of {routes.length} belt connections routed
+            </p>
+            {sum("import").map(([item, rate]) => (
+                <span key={`i${item}`} className="text-[var(--info)]">
+                    IN at the edge: {item} {formatRate(rate)}/m
+                </span>
+            ))}
+            {sum("export").map(([item, rate]) => (
+                <span key={`e${item}`} className="text-[var(--warning)]">
+                    OUT at the edge: {item} {formatRate(rate)}/m
+                </span>
+            ))}
+            {[...groups.values()].map((g) => (
+                <span key={`${g.itemName}${g.from}${g.to}`} className="text-[var(--text-secondary)]">
+                    {g.itemName} {formatRate(g.rate)}/m: {g.from} → {g.to}
+                    {g.count > 1 ? <span className="text-[var(--text-muted)]"> ({g.count} belts)</span> : null}
+                </span>
+            ))}
+            {failed.map((r, i) => (
+                <span key={`f${i}`} className="text-[var(--error)]">
+                    Not routed: {r.itemName} {formatRate(r.rate)}/m {r.from} → {r.to}
+                </span>
+            ))}
+        </section>
     );
 }

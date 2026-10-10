@@ -64,6 +64,7 @@ const CATEGORY_COLORS: Record<BuildingCategory, string> = {
 const STEP_COLORS = ["#d4a43a", "#5dd97a", "#6db8e8", "#e8a840", "#b794ff", "#e05e8a", "#4fd1c5", "#c7d65b", "#f0845c", "#8fa8ff"];
 
 export function placementColor(p: Placement, stepIndex: Map<string, number>): string {
+    if (p.lane) return beltColor(p);
     const fp = getFootprint(p.id);
     if (fp?.category === "production" && p.nodeKey && stepIndex.has(p.nodeKey)) {
         return STEP_COLORS[stepIndex.get(p.nodeKey)! % STEP_COLORS.length];
@@ -71,8 +72,8 @@ export function placementColor(p: Placement, stepIndex: Map<string, number>): st
     return CATEGORY_COLORS[fp?.category ?? "logistics"];
 }
 
-/** Belt arrows: blue for lanes feeding machines, orange for lanes collecting output, grey for hand-drawn belts */
-export const BELT_COLORS = { in: "#5fb8f0", out: "#f0a040", manual: "#c8c0d8", track: "#2b2540" } as const;
+/** Belt arrows: blue feeds machines, orange collects output, purple connects blocks, grey is hand-drawn */
+export const BELT_COLORS = { in: "#5fb8f0", out: "#f0a040", route: "#c084fc", manual: "#c8c0d8", track: "#2b2540" } as const;
 
 export function beltColor(p: Placement): string {
     return p.lane ? BELT_COLORS[p.lane] : BELT_COLORS.manual;

@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { isBeltPiece } from "../../engine/build/belt-pieces";
 import type { TierInfo } from "../../engine/build/generator";
+import type { IoPoint } from "../../engine/build/router";
+import { formatRate } from "../../lib/beltDisplay";
 import { getFootprint, rotatedSize } from "../../engine/build/footprint";
 import { placementCells, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
 import { LAYER, QUAD } from "../../engine/build/types";
@@ -13,6 +15,7 @@ import { BELT_COLORS, beltColor, buildingName, isMachine, isSupport, placementCo
 interface View3DProps {
     placements: Placement[];
     tiers: TierInfo[];
+    io: IoPoint[];
     ports: PortStatus[];
     stepIndex: Map<string, number>;
     issuesByUid: Map<string, LayoutIssue[]>;
@@ -147,9 +150,15 @@ function textSprite(lines: string[], color: string, cellHeight: number): THREE.S
     return sprite;
 }
 
-/** Block names above each block, item names where lanes enter and leave */
-function blockLabels(tiers: TierInfo[], placements: Placement[], ports: PortStatus[]): THREE.Sprite[] {
+/** Block names above each block, imports/exports at the edge, and any lane left unconnected */
+function blockLabels(tiers: TierInfo[], io: IoPoint[], placements: Placement[], ports: PortStatus[]): THREE.Sprite[] {
     const sprites: THREE.Sprite[] = [];
+    for (const point of io) {
+        const importing = point.kind === "import";
+        const sprite = textSprite([`${importing ? "IN" : "OUT"}: ${point.itemName}`, `${formatRate(point.rate)}/m`], importing ? BELT_COLORS.in : BELT_COLORS.out, 0.7);
+        sprite.position.set(point.cell[0] + 0.5, point.cell[2] + 1.6, point.cell[1] + 0.5);
+        sprites.push(sprite);
+    }
     const byUid = new Map(placements.map((p) => [p.uid, p]));
 
     tiers.forEach((t, index) => {
@@ -158,7 +167,7 @@ function blockLabels(tiers: TierInfo[], placements: Placement[], ports: PortStat
         label.position.set(t.x + t.width / 2, t.z + t.height + 2.2, t.y + t.depth / 2);
         sprites.push(label);
 
-        // Lane ends that connect to nothing are where items come in or go out
+        // Lane ends that still connect to nothing
         for (const kind of ["in", "out"] as const) {
             const ends = ports.filter((s) => {
                 const p = byUid.get(s.port.uid);
@@ -170,7 +179,7 @@ function blockLabels(tiers: TierInfo[], placements: Placement[], ports: PortStat
             const cx = ends.reduce((s, e) => s + e.port.x, 0) / ends.length + 0.5;
             const cy = ends.reduce((s, e) => s + e.port.y, 0) / ends.length + 0.5;
             const z = Math.max(...ends.map((e) => e.port.z));
-            const sprite = textSprite([`${kind === "in" ? "IN" : "OUT"}: ${names}`, `${ends.length} belt${ends.length === 1 ? "" : "s"}`], kind === "in" ? BELT_COLORS.in : BELT_COLORS.out, 0.6);
+            const sprite = textSprite([`OPEN ${kind === "in" ? "input" : "output"}: ${names}`, `${ends.length} belt${ends.length === 1 ? "" : "s"} not connected`], "#e05555", 0.6);
             sprite.position.set(cx, z + 1.2, cy);
             sprites.push(sprite);
         }
@@ -199,7 +208,7 @@ function disposeObject(o: THREE.Object3D) {
     }
 }
 
-export function View3D({ placements, tiers, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels }: View3DProps) {
+export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels }: View3DProps) {
     const mountRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneState | null>(null);
     const byUid = useRef(new Map<string, Placement>());
@@ -310,7 +319,7 @@ export function View3D({ placements, tiers, ports, stepIndex, issuesByUid, selec
         const solidMesh = instancedMesh(solid, new THREE.MeshLambertMaterial());
         const supportMesh = instancedMesh(supports, new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.22, depthWrite: false }));
         const outlines = machineOutlines(placements, cutLevel);
-        const labels = showLabels ? blockLabels(tiers, placements, ports) : [];
+        const labels = showLabels ? blockLabels(tiers, io, placements, ports) : [];
         s.objects = [solidMesh, supportMesh, outlines, ...labels];
         s.objects.forEach((o) => s.scene.add(o));
         s.pickable = solidMesh;
@@ -327,7 +336,7 @@ export function View3D({ placements, tiers, ports, stepIndex, issuesByUid, selec
             s.camera.position.set(center.x + radius * 0.9, center.y + radius * 1.0, center.z + radius * 1.1);
             s.framed = true;
         }
-    }, [placements, tiers, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels]);
+    }, [placements, tiers, io, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels]);
 
     return (
         <div className="relative w-full h-full min-h-[320px]">
@@ -346,6 +355,9 @@ export function View3D({ placements, tiers, ports, stepIndex, issuesByUid, selec
                 </span>
                 <span>
                     <span style={{ color: BELT_COLORS.out }}>■</span> belt out of machines
+                </span>
+                <span>
+                    <span style={{ color: BELT_COLORS.route }}>■</span> belt/lift between blocks
                 </span>
                 <span>hatched/faded: supports</span>
                 <span>drag orbit · right-drag pan · scroll zoom · hover for names</span>

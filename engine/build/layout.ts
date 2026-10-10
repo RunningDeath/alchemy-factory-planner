@@ -23,9 +23,11 @@ export interface Placement {
     /** What a belt carries, for display */
     label?: string;
     /** Generated belt lanes: feeding machines or collecting their output */
-    lane?: "in" | "out";
+    lane?: "in" | "out" | "route";
     /** Generated block (index into the module's tiers) this building belongs to */
     block?: number;
+    /** Open end of a generated lane: where items enter (in) or leave (out) the block */
+    laneEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
 }
 
 export interface WorldCell extends FootprintCell {

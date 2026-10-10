@@ -85,3 +85,51 @@ export function transformBlock(placements: Placement[], depth: number, rot: 0 | 
         };
     });
 }
+
+export interface FlowItem extends PackItem {
+    /** Production stage: 0 for blocks fed only from outside, then one more per step */
+    stage: number;
+    /** Blocks that make this block's inputs */
+    feeders: number[];
+}
+
+/**
+ * Flow layout: one row of blocks per production stage, from raw materials (top) to the
+ * final products (bottom). Inputs face the previous row and outputs the next, so most
+ * belts run straight down. Within a row, blocks sit under the blocks that feed them.
+ */
+export function flowRows(items: FlowItem[], maxWidth: number, gapX: number, gapY: number): { positions: PackedItem[]; width: number; depth: number } {
+    const positions = new Array<PackedItem>(items.length);
+    const stages = [...new Set(items.map((it) => it.stage))].sort((a, b) => a - b);
+    let y = 0;
+    let width = 0;
+
+    for (const stage of stages) {
+        const members = items.map((_, i) => i).filter((i) => items[i].stage === stage);
+        const center = (i: number) => {
+            const placed = items[i].feeders.filter((f) => positions[f]);
+            if (placed.length === 0) return Infinity;
+            return placed.reduce((s, f) => s + positions[f].x + items[f].width / 2, 0) / placed.length;
+        };
+        members.sort((a, b) => center(a) - center(b));
+
+        let x = 0;
+        let rowDepth = 0;
+        for (const i of members) {
+            if (x > 0 && x + items[i].width > maxWidth) {
+                y += rowDepth + gapY;
+                x = 0;
+                rowDepth = 0;
+            }
+            // Line up under the feeders where there's room
+            const target = Math.round(center(i) - items[i].width / 2);
+            if (Number.isFinite(target) && target > x && target + items[i].width <= Math.max(maxWidth, width)) x = target;
+            positions[i] = { x, y, rot: 0 };
+            x += items[i].width + gapX;
+            width = Math.max(width, x - gapX);
+            rowDepth = Math.max(rowDepth, items[i].depth);
+        }
+        y += rowDepth + gapY;
+    }
+    return { positions, width, depth: y - gapY };
+}

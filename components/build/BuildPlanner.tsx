@@ -105,10 +105,16 @@ export function BuildPlanner() {
     const handleGenerate = () => {
         if (!report || steps.length === 0) return;
         if (placements.length > 0 && !window.confirm("Replace the current layout with a generated module?")) return;
-        const mod = generateModule(steps, { ...options, beltSpeed: report.beltSpeed });
-        commit({ placements: mod.placements, options, tiers: mod.tiers });
-        setLevel(0);
-        setSelectedUid(null);
+        // Routing takes a moment: show that before the browser is busy
+        setMessage("Generating module and routing belts…");
+        setTimeout(() => {
+            const mod = generateModule(steps, { ...options, beltSpeed: report.beltSpeed });
+            commit({ placements: mod.placements, options, tiers: mod.tiers, routes: mod.routes, io: mod.io });
+            const failed = mod.routes.filter((r) => !r.ok).length;
+            flash(failed ? `${failed} belt connection${failed === 1 ? "" : "s"} could not be routed` : `All ${mod.routes.length} belt connections routed`);
+            setLevel(0);
+            setSelectedUid(null);
+        }, 30);
     };
 
     const handlePlace = (pending: Placement[]) => {
@@ -277,6 +283,7 @@ export function BuildPlanner() {
                                 <View3D
                                     placements={placements}
                                     tiers={layout?.tiers ?? []}
+                                    io={layout?.io ?? []}
                                     ports={ports}
                                     showSupports={showSupports}
                                     showLabels={showLabels}
@@ -296,6 +303,8 @@ export function BuildPlanner() {
                         issues={issues}
                         ports={ports}
                         tiers={layout?.tiers ?? []}
+                        routes={layout?.routes ?? []}
+                        io={layout?.io ?? []}
                         onSelect={setSelectedUid}
                         onGoToLevel={setLevel}
                     />

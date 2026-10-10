@@ -1,4 +1,5 @@
 import type { TierInfo } from "./build/generator";
+import type { IoPoint, RouteResult } from "./build/router";
 import type { Placement } from "./build/layout";
 
 export type Category =
@@ -151,6 +152,10 @@ export interface BuildLayoutState {
   options?: { maxWidth: number; maxDepth: number; maxStack: number; maxHeight?: number };
   /** Tiers and lanes of the last generated module */
   tiers?: TierInfo[];
+  /** Belt connections between blocks of the last generated module */
+  routes?: RouteResult[];
+  /** Where raw materials come in and products leave */
+  io?: IoPoint[];
 }
 
 export interface FactoryState {

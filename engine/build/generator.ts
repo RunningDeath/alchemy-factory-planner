@@ -22,8 +22,10 @@
  */
 import { beltPieceFor } from "./belt-pieces";
 import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, type Rotation } from "./footprint";
-import { buildOccupancy, cellKey, placementIssues, placementPorts, type Placement, type WorldCell } from "./layout";
-import { packBlocks, transformBlock } from "./packing";
+import { buildOccupancy, placementPorts, type Placement } from "./layout";
+import { supportColumn } from "./supports";
+import { flowRows, packBlocks, transformBlock } from "./packing";
+import { routeModule, type IoPoint, type RouteResult } from "./router";
 import type { BuildingFootprint, Side } from "./types";
 
 export interface StepFlow {
@@ -106,10 +108,16 @@ export interface GeneratedModule {
     placements: Placement[];
     tiers: TierInfo[];
     size: [number, number, number];
+    /** Belt connections between blocks, imports and exports */
+    routes: RouteResult[];
+    io: IoPoint[];
 }
 
-const FRAME_ID = "frame-single";
-const BLOCK_ID = "wood-block";
+/** Free cells around each block, so belts can run between blocks; wider when routing fails */
+const CORRIDORS = [1, 2, 3];
+/** Free cells around the whole module for imports, exports and detours */
+const ROUTING_MARGIN = 3;
+
 
 /** Turn the machine so most inputs face left and outputs face right */
 export function machineRotation(fp: BuildingFootprint): Rotation {
@@ -248,29 +256,6 @@ interface PortHit {
 }
 
 /** Something under (x, y, z) that a belt or frame can stand on */
-function isSupported(occupancy: Map<string, WorldCell[]>, x: number, y: number, z: number, groundZ: number): boolean {
-    if (z <= groundZ) return true;
-    return (occupancy.get(cellKey(x, y, z - 1)) ?? []).some((c) => c.stackable && c.quads === 15);
-}
-
-/** Frames from the ground (or the first stackable cell) up to just below z */
-function supportColumn(placements: Placement[], x: number, y: number, z: number, groundZ: number): Placement[] {
-    const frames: Placement[] = [];
-    let occupancy = buildOccupancy(placements);
-    for (let fz = z - 1; fz >= groundZ; fz--) {
-        if (isSupported(occupancy, x, y, fz + 1, groundZ)) break;
-        // Lab stand first (it shares its cell with a belt), wood block where that doesn't fit
-        const support = [FRAME_ID, BLOCK_ID]
-            .map((id): Placement => ({ uid: nextUid("f"), id, x, y, z: fz, rot: 0 }))
-            .find((p) => !placementIssues(p, occupancy).some((i) => i.kind === "collision"));
-        // A leg or stand top in the way: leave it unsupported, the checks will show it
-        if (!support) break;
-        frames.push(support);
-        occupancy = buildOccupancy([...placements, ...frames]);
-    }
-    return frames;
-}
-
 function buildTier(
     step: ModuleStep,
     count: number,
@@ -356,6 +341,11 @@ function buildTier(
             const yStart = feeds ? top : Math.min(...ys.filter((y) => byY.get(y)!.ins.length > 0));
             const yEnd = collects ? bottom : Math.max(...ys.filter((y) => byY.get(y)!.outs.length > 0));
 
+            const laneMachines = (pick: "ins" | "outs") =>
+                new Set([...byY.values()].flatMap((h) => h[pick].map((p) => p.machine.uid))).size;
+            const laneItems = (flows: StepFlow[], machines: number) =>
+                flows.map((fl) => ({ itemName: fl.itemName, rate: fl.perMachineRate * machines }));
+
             for (let y = yStart; y <= yEnd; y++) {
                 const at = byY.get(y);
                 const ins: Side[] = [...new Set(at?.ins.map((h) => h.side) ?? [])];
@@ -365,24 +355,28 @@ function buildTier(
                 const piece = beltPieceFor(ins, outs) ?? beltPieceFor(["up"], ["down"])!;
                 const lane = feeds ? "in" : "out";
                 const label = (lane === "in" ? step.inputs : step.outputs).map((fl) => fl.itemName).join(" + ");
-                belts.push({ uid: nextUid("b"), id: piece.id, x: laneX, y, z, rot: piece.rot, nodeKey: step.nodeKey, lane, label });
+                const belt: Placement = { uid: nextUid("b"), id: piece.id, x: laneX, y, z, rot: piece.rot, nodeKey: step.nodeKey, lane, label };
+                // The open ends are where the router connects the block to the rest of the module
+                if (feeds && y === yStart) belt.laneEnd = { kind: "in", items: laneItems(step.inputs, laneMachines("outs")) };
+                else if (collects && y === yEnd) belt.laneEnd = { kind: "out", items: laneItems(step.outputs, laneMachines("ins")) };
+                belts.push(belt);
             }
 
-            const lanesMachines = (pick: "ins" | "outs") =>
-                new Set([...byY.values()].flatMap((h) => h[pick].map((p) => p.machine.uid))).size;
-            if (feeds) lanes.push(laneInfo("in", laneX - origin.x, level, z, step.inputs, lanesMachines("outs"), beltSpeed));
-            if (collects) lanes.push(laneInfo("out", laneX - origin.x, level, z, step.outputs, lanesMachines("ins"), beltSpeed));
+            if (feeds) lanes.push(laneInfo("in", laneX - origin.x, level, z, step.inputs, laneMachines("outs"), beltSpeed));
+            if (collects) lanes.push(laneInfo("out", laneX - origin.x, level, z, step.outputs, laneMachines("ins"), beltSpeed));
         }
     }
     placements.push(...belts);
 
     // Beam ends rest on lab stand pillars; upper belts rest on beams, elsewhere on pillars too
+    const occupancy = buildOccupancy(placements);
+    const makeUid = () => nextUid("f");
     for (const d of [...decks].sort((a, c) => a.z - c.z)) {
         const length = stacking.beamLength!;
-        for (const endX of [d.x, d.x + length - 1]) placements.push(...supportColumn(placements, endX, d.y, d.z, origin.z));
+        for (const endX of [d.x, d.x + length - 1]) placements.push(...supportColumn(occupancy, endX, d.y, d.z, origin.z, makeUid));
     }
     for (const b of belts.filter((bb) => bb.z > origin.z).sort((a, c) => a.z - c.z)) {
-        placements.push(...supportColumn(placements, b.x, b.y, b.z, origin.z));
+        placements.push(...supportColumn(occupancy, b.x, b.y, b.z, origin.z, makeUid));
     }
 
     return {
@@ -445,25 +439,96 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
         }
     }
 
-    const packed = packBlocks(
-        blocks.map((b) => ({ width: b.info.width, depth: b.info.depth })),
-        options.maxWidth,
-    );
-    const placements: Placement[] = [];
+    // Production stage of each step: how many steps lie between it and the module's inputs
+    const stepByNode = new Map(steps.map((st) => [st.nodeKey, st]));
+    const producers = (item: string) => steps.filter((st) => st.outputs.some((o) => o.itemName === item));
+    const stageMemo = new Map<string, number>();
+    const stageOf = (st: ModuleStep, seen = new Set<string>()): number => {
+        if (stageMemo.has(st.nodeKey)) return stageMemo.get(st.nodeKey)!;
+        if (seen.has(st.nodeKey)) return 0;
+        seen.add(st.nodeKey);
+        const feeders = st.inputs.flatMap((i) => producers(i.itemName)).filter((p) => p.nodeKey !== st.nodeKey);
+        const stage = feeders.length ? Math.max(...feeders.map((p) => stageOf(p, seen))) + 1 : 0;
+        stageMemo.set(st.nodeKey, stage);
+        return stage;
+    };
+    const flow = blocks.map((b) => {
+        const st = stepByNode.get(b.info.nodeKey)!;
+        const feederNodes = new Set(st.inputs.flatMap((i) => producers(i.itemName)).map((p) => p.nodeKey));
+        return {
+            stage: stageOf(st),
+            feeders: blocks.map((o, i) => (feederNodes.has(o.info.nodeKey) ? i : -1)).filter((i) => i >= 0),
+        };
+    });
+
+    // Try the flow layout (rows by production stage) and the tight packing; keep the one
+    // that routes everything with the fewest lifts and the least floor
+    let best: GeneratedModule | null = null;
+    const score = (m: GeneratedModule) =>
+        m.routes.filter((r) => !r.ok).length * 100000 +
+        m.placements.filter((p) => p.id === "conveyer-lift-upwards" || p.id === "conveyer-lift-downwards").length * 40 +
+        m.size[0] * m.size[1];
+    for (const corridor of CORRIDORS) {
+        for (const mode of ["flow", "packed"] as const) {
+            const result = layOut(blocks, flow, corridor, mode, options);
+            if (!best || score(result) < score(best)) best = result;
+        }
+        if (best && best.routes.every((r) => r.ok)) break;
+    }
+    return best!;
+}
+
+/** Places the blocks with free corridors between them and belts them together */
+function layOut(
+    blocks: { placements: Placement[]; info: TierInfo }[],
+    flow: { stage: number; feeders: number[] }[],
+    corridor: number,
+    mode: "flow" | "packed",
+    options: ModuleOptions,
+): GeneratedModule {
+    const pad = corridor * 2;
+    const sizes = blocks.map((b) => ({ width: b.info.width + pad, depth: b.info.depth + pad }));
+    const packed =
+        mode === "flow"
+            ? flowRows(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad, 0, 1)
+            : packBlocks(sizes, options.maxWidth + pad);
+    const blockPlacements: Placement[] = [];
     const tiers = blocks.map((b, i) => {
         const pos = packed.positions[i];
-        placements.push(...transformBlock(b.placements, b.info.depth, pos.rot, pos.x, pos.y));
+        const padded = b.placements.map((p) => ({ ...p, x: p.x + corridor, y: p.y + corridor }));
+        blockPlacements.push(...transformBlock(padded, b.info.depth + pad, pos.rot, pos.x, pos.y));
         const turned = pos.rot === 1;
         return {
             ...b.info,
-            x: pos.x,
-            y: pos.y,
+            x: pos.x + corridor,
+            y: pos.y + corridor,
             width: turned ? b.info.depth : b.info.width,
             depth: turned ? b.info.width : b.info.depth,
             turned,
         };
     });
 
-    const height = Math.max(0, ...tiers.map((t) => t.z + t.height));
-    return { placements, tiers, size: [packed.width, packed.depth, height] };
+    // Belt the blocks to each other, to the imports and to the exports
+    const routed = blockPlacements.length
+        ? routeModule(blockPlacements, {
+              beltSpeed: options.beltSpeed,
+              margin: ROUTING_MARGIN,
+              maxHeight: options.maxHeight,
+              blockNames: tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`),
+          })
+        : { placements: [], routes: [], io: [] };
+
+    const cells = routed.placements.map((p) => {
+        const fp = getFootprint(p.id);
+        const size = fp ? rotatedSize(fp, p.rot) : { x: 1, y: 1, z: 1 };
+        return [p.x, p.y, p.z, p.x + size.x, p.y + size.y, p.z + size.z];
+    });
+    const size: [number, number, number] = cells.length
+        ? [
+              Math.max(...cells.map((c) => c[3])) - Math.min(...cells.map((c) => c[0])),
+              Math.max(...cells.map((c) => c[4])) - Math.min(...cells.map((c) => c[1])),
+              Math.max(...cells.map((c) => c[5])),
+          ]
+        : [0, 0, 0];
+    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io };
 }
