@@ -14,6 +14,7 @@ import { GlobalResearchPanel } from "../components/dashboard/GlobalResearchPanel
 import { IOSummaryPanel } from "../components/dashboard/IOSummaryPanel";
 import { BeltSummaryPanel } from "../components/dashboard/BeltSummaryPanel";
 import { NodeView } from "../components/dashboard/NodeView";
+import { BuildPlanner } from "../components/build/BuildPlanner";
 import { ProductionNode, Item } from "../engine/types";
 import { useFactoryStore } from "../store/useFactoryStore";
 import itemsData from "../data/items.json";
@@ -194,6 +195,8 @@ export default function PlannerPage() {
             {productionTrees && productionTrees.length > 0 ? (
               activeFactory.viewMode === "graph" ? (
                 <GraphView key={activeFactory.id} />
+              ) : activeFactory.viewMode === "build" ? (
+                <BuildPlanner key={activeFactory.id} />
               ) : (
                 <div className="p-8 overflow-auto custom-scrollbar h-full pt-16">
                   <div className="min-w-max space-y-8">

@@ -1,4 +1,4 @@
-import { GitGraph, LayoutList, PlusCircle, X } from "lucide-react";
+import { Boxes, GitGraph, LayoutList, PlusCircle, X } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/utils";
 import { useFactoryStore } from "../../store/useFactoryStore";
@@ -130,6 +130,17 @@ export function FactoryTabs() {
                             )}
                         >
                             <LayoutList size={12} /> List
+                        </button>
+                        <button
+                            onClick={() => setViewMode(activeFactory.id, "build")}
+                            className={cn(
+                                "px-2.5 py-1.5 rounded-md flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer",
+                                activeFactory.viewMode === "build"
+                                    ? "bg-gradient-to-br from-[var(--accent-gold)]/20 to-[var(--accent-purple)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold-dim)]/30"
+                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)]/50",
+                            )}
+                        >
+                            <Boxes size={12} /> Build
                         </button>
                     </div>
                 </div>

@@ -1,3 +1,6 @@
+import type { TierInfo } from "./build/generator";
+import type { Placement } from "./build/layout";
+
 export type Category =
   | "raw materials"
   | "fuel"
@@ -139,14 +142,26 @@ export type LineOverride = "on" | "off";
 /** Machine count rounding. "exact" keeps the solver's fractions (machines throttled to demand). */
 export type RoundingMode = "exact" | "up" | "down";
 
+export type ViewMode = "graph" | "list" | "build";
+
+/** Saved module layout for the Build view */
+export interface BuildLayoutState {
+  placements: Placement[];
+  /** Generator settings last used for this factory */
+  options?: { maxWidth: number; maxDepth: number; maxStack: number };
+  /** Tiers and lanes of the last generated module */
+  tiers?: TierInfo[];
+}
+
 export interface FactoryState {
   id: string;
   name: string;
   targets: { item: string; rate: number }[];
   availableResources: { item: string; rate: number }[];
   config: Omit<PlannerConfig, "targets" | "targetItem" | "targetRate" | "availableResources">;
-  viewMode: "graph" | "list";
+  viewMode: ViewMode;
   plannerMode: PlannerMode;
   lineOverrides?: Record<string, LineOverride>; // Keyed by production node key
   roundingOverrides?: Record<string, RoundingMode>; // Keyed by production node key
+  buildLayout?: BuildLayoutState;
 }

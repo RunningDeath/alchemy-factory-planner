@@ -1,0 +1,124 @@
+"use client";
+
+import { ChevronDown, ChevronUp, FlipHorizontal2, Redo2, RotateCw, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import type { ModuleOptions } from "../../engine/build/generator";
+import { buildingName } from "../../lib/buildCatalog";
+import { cn } from "../../lib/utils";
+import type { BuildTool } from "./LayerGrid";
+
+export type BuildViewMode = "2d" | "split" | "3d";
+type GeneratorOptions = Omit<ModuleOptions, "beltSpeed">;
+
+interface BuildToolbarProps {
+    options: GeneratorOptions;
+    onOptionsChange: (options: GeneratorOptions) => void;
+    canGenerate: boolean;
+    onGenerate: () => void;
+    onClear: () => void;
+    level: number;
+    onLevelChange: (level: number) => void;
+    tool: BuildTool | null;
+    onRotate: () => void;
+    onVariant: () => void;
+    cellSize: number;
+    onCellSizeChange: (size: number) => void;
+    view: BuildViewMode;
+    onViewChange: (view: BuildViewMode) => void;
+    cutAbove: boolean;
+    onCutAboveChange: (cut: boolean) => void;
+    onUndo: () => void;
+    onRedo: () => void;
+}
+
+const buttonClass =
+    "px-2 py-1.5 rounded-md flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold-dim)] disabled:opacity-40 disabled:cursor-not-allowed";
+
+function NumberField({ label, value, min, max, onChange, title }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void; title: string }) {
+    return (
+        <label className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]" title={title}>
+            {label}
+            <input
+                type="number"
+                min={min}
+                max={max}
+                value={value}
+                onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, Math.round(v))));
+                }}
+                className="w-12 bg-[var(--background)] border border-[var(--border)] rounded px-1 py-0.5 text-[var(--text-primary)] font-mono text-xs"
+            />
+        </label>
+    );
+}
+
+export function BuildToolbar(props: BuildToolbarProps) {
+    const { options, onOptionsChange, tool, view } = props;
+    return (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[var(--border)] bg-[var(--surface)]/60 pt-12 lg:pt-3">
+            <button onClick={props.onGenerate} disabled={!props.canGenerate} className={cn(buttonClass, "text-[var(--accent-gold)] border-[var(--accent-gold-dim)]")} title="Lay out every machine of the plan as a stacked module">
+                <Sparkles size={12} /> Generate module
+            </button>
+            <NumberField label="Max W" value={options.maxWidth} min={4} max={64} title="Widest a tier may get, in cells (a wooden floor is 16)" onChange={(maxWidth) => onOptionsChange({ ...options, maxWidth })} />
+            <NumberField label="Max D" value={options.maxDepth} min={4} max={64} title="Deepest a tier may get, in cells" onChange={(maxDepth) => onOptionsChange({ ...options, maxDepth })} />
+            <NumberField label="Stack" value={options.maxStack} min={1} max={8} title="How high stackable machines (grinders, …) may be stacked" onChange={(maxStack) => onOptionsChange({ ...options, maxStack })} />
+
+            <span className="w-px h-6 bg-[var(--border)] mx-1" />
+
+            <div className="flex items-center gap-1">
+                <button onClick={() => props.onLevelChange(props.level - 1)} className={buttonClass} title="Level down (Q)">
+                    <ChevronDown size={12} />
+                </button>
+                <span className="text-xs font-mono text-[var(--text-primary)] min-w-[64px] text-center">Level {props.level}</span>
+                <button onClick={() => props.onLevelChange(props.level + 1)} className={buttonClass} title="Level up (E)">
+                    <ChevronUp size={12} />
+                </button>
+            </div>
+            <button onClick={props.onRotate} disabled={!tool} className={buttonClass} title="Rotate (R)">
+                <RotateCw size={12} /> {tool ? `${tool.rot * 90}°` : "Rotate"}
+            </button>
+            <button onClick={props.onVariant} disabled={!tool || !tool.id} className={buttonClass} title="Next build option, e.g. mirrored or another belt shape (F)">
+                <FlipHorizontal2 size={12} /> {tool ? buildingName(tool.id) : "Variant"}
+            </button>
+
+            <span className="w-px h-6 bg-[var(--border)] mx-1" />
+
+            <button onClick={props.onUndo} className={buttonClass} title="Undo (Ctrl+Z)">
+                <Undo2 size={12} />
+            </button>
+            <button onClick={props.onRedo} className={buttonClass} title="Redo (Ctrl+Y)">
+                <Redo2 size={12} />
+            </button>
+            <button onClick={() => props.onCellSizeChange(Math.max(10, props.cellSize - 4))} className={buttonClass} title="Zoom out">
+                <ZoomOut size={12} />
+            </button>
+            <button onClick={() => props.onCellSizeChange(Math.min(48, props.cellSize + 4))} className={buttonClass} title="Zoom in">
+                <ZoomIn size={12} />
+            </button>
+            <button onClick={props.onClear} className={buttonClass} title="Remove everything">
+                <Trash2 size={12} />
+            </button>
+
+            <div className="flex-1" />
+
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Hide everything above the current level in 3D">
+                <input type="checkbox" checked={props.cutAbove} onChange={(e) => props.onCutAboveChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
+                Cut 3D at level
+            </label>
+            <div className="flex bg-[var(--surface)] p-1 rounded-lg border border-[var(--border)] gap-1">
+                {(["2d", "split", "3d"] as BuildViewMode[]).map((mode) => (
+                    <button
+                        key={mode}
+                        onClick={() => props.onViewChange(mode)}
+                        className={cn(
+                            "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider cursor-pointer",
+                            view === mode ? "text-[var(--accent-gold)] bg-[var(--accent-gold)]/10" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
+                        )}
+                    >
+                        {mode}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}

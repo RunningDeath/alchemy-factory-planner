@@ -13,6 +13,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { calculateProduction } from "../engine/planner";
 import { calculateProductionLP } from "../engine/lp-planner";
 import {
+    BuildLayoutState,
     FactoryState,
     LineOverride,
     PlannerConfig,
@@ -20,6 +21,7 @@ import {
     PlannerMode,
     ProductionNode,
     ResearchState,
+    ViewMode,
 } from "../engine/types";
 import { analyzeBelts, BeltReport, DEFAULT_ROUNDING, LineMode, RoundingChoice } from "../engine/belt-analysis";
 import { generateGraph } from "../lib/graphMapper";
@@ -138,7 +140,8 @@ interface FactoryStore {
     onNodesChange: (changes: NodeChange[]) => void;
     onEdgesChange: (changes: EdgeChange[]) => void;
     onViewportChange: (viewport: Viewport) => void;
-    setViewMode: (id: string, mode: "graph" | "list") => void;
+    setViewMode: (id: string, mode: ViewMode) => void;
+    setBuildLayout: (id: string, layout: BuildLayoutState) => void;
     setPlannerMode: (id: string, mode: PlannerMode) => void;
     setLineOverride: (id: string, nodeKey: string, mode: LineMode) => void;
     setRoundingOverride: (id: string, nodeKey: string, mode: RoundingChoice) => void;
@@ -263,6 +266,14 @@ export const useFactoryStore = create<FactoryStore>()(
                 set((state) => ({
                     factories: state.factories.map((f) =>
                         f.id === id ? { ...f, viewMode: mode } : f
+                    ),
+                }));
+            },
+
+            setBuildLayout: (id, layout) => {
+                set((state) => ({
+                    factories: state.factories.map((f) =>
+                        f.id === id ? { ...f, buildLayout: layout } : f
                     ),
                 }));
             },
