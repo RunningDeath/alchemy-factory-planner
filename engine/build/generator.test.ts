@@ -83,7 +83,7 @@ describe("generateModule", () => {
     expect(mod.placements.some((p) => p.id === "frame-single")).toBe(true);
   });
 
-  test("steps sit side by side on the ground; nurseries stack on metal stands; one storey high", () => {
+  test("steps sit side by side on the ground; nurseries stack on beam decks; one storey high", () => {
     const mod = generateModule(
       [
         step({ nodeKey: "a", deviceId: "nursery", machines: 8, inputs: [{ itemName: "Growth Potion", perMachineRate: 1 }], outputs: [{ itemName: "Flax", perMachineRate: 165 }] }),
@@ -95,15 +95,17 @@ describe("generateModule", () => {
     expect(mod.size[2]).toBeLessThanOrEqual(16);
     expect(mod.placements.some((p) => p.id.startsWith("construct-floor"))).toBe(false);
     const nurseries = mod.tiers.filter((t) => t.nodeKey === "a");
-    expect(nurseries.some((t) => t.stacking === "metal-stand" && t.levels > 1)).toBe(true);
+    expect(nurseries.some((t) => t.stacking === "beam-deck" && t.levels > 1)).toBe(true);
+    expect(mod.placements.some((p) => p.id === "metal-stand")).toBe(false);
+    expect(mod.placements.some((p) => p.id === "beam5")).toBe(true);
     expect(mod.tiers.every((t) => t.lanes.every((l) => !l.overBelt))).toBe(true);
     expect(validateLayout(mod.placements)).toEqual([]);
     expect(unconnectedMachinePorts(mod)).toEqual([]);
   });
 
-  test("assemblers stack on metal stands, with belts carried on every level", () => {
+  test("assemblers stack on beam decks, with belts carried on every level", () => {
     const fp = getFootprint("assembler")!;
-    expect(stackingFor(fp, machineRotation(fp))).toMatchObject({ kind: "metal-stand", pitch: 3 });
+    expect(stackingFor(fp, machineRotation(fp))).toMatchObject({ kind: "beam-deck", pitch: 4, beamId: "beam5" });
     const mod = generateModule(
       [step({ machines: 12, inputs: [{ itemName: "A", perMachineRate: 20 }], outputs: [{ itemName: "B", perMachineRate: 10 }] })],
       { ...options, maxWidth: 10, maxDepth: 10 },

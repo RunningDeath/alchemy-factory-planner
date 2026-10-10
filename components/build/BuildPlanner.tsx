@@ -6,7 +6,7 @@ import { DEFAULT_MODULE_OPTIONS, generateModule } from "../../engine/build/gener
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
 import type { BuildLayoutState } from "../../engine/types";
-import { buildingName } from "../../lib/buildCatalog";
+import { BELT_COLORS, buildingName } from "../../lib/buildCatalog";
 import { useFactoryStore } from "../../store/useFactoryStore";
 import { BuildInfoPanel } from "./BuildInfoPanel";
 import { BuildPalette } from "./BuildPalette";
@@ -15,6 +15,29 @@ import { LayerGrid, type BuildTool } from "./LayerGrid";
 import { View3D } from "./View3D";
 
 const EMPTY: Placement[] = [];
+
+/** What's under the pointer in the level grid */
+function HoverInfo({ placements }: { placements: Placement[] }) {
+    if (placements.length === 0) return null;
+    return (
+        <span className="text-[var(--text-secondary)]">
+            Here:{" "}
+            {placements.map((p, i) => (
+                <span key={p.uid}>
+                    {i > 0 && " + "}
+                    <b className="text-[var(--text-primary)]">{buildingName(p.id)}</b>
+                    {p.label && (
+                        <span style={{ color: p.lane ? BELT_COLORS[p.lane] : undefined }}>
+                            {" "}
+                            ({p.lane === "in" ? "in: " : p.lane === "out" ? "out: " : ""}
+                            {p.label})
+                        </span>
+                    )}
+                </span>
+            ))}
+        </span>
+    );
+}
 const HISTORY_LIMIT = 50;
 
 export function BuildPlanner() {
@@ -32,6 +55,9 @@ export function BuildPlanner() {
     const [cellSize, setCellSize] = useState(22);
     const [view, setView] = useState<BuildViewMode>("split");
     const [cutAbove, setCutAbove] = useState(false);
+    const [showSupports, setShowSupports] = useState(true);
+    const [showLabels, setShowLabels] = useState(true);
+    const [hoverCell, setHoverCell] = useState<[number, number] | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
     const undoStack = useRef<BuildLayoutState[]>([]);
@@ -193,6 +219,10 @@ export function BuildPlanner() {
                 onViewChange={setView}
                 cutAbove={cutAbove}
                 onCutAboveChange={setCutAbove}
+                showSupports={showSupports}
+                onShowSupportsChange={setShowSupports}
+                showLabels={showLabels}
+                onShowLabelsChange={setShowLabels}
                 onUndo={undo}
                 onRedo={redo}
             />
@@ -218,6 +248,7 @@ export function BuildPlanner() {
                             <span>Pick a building on the left. Click selects, right-click removes. Q/E change level.</span>
                         )}
                         {message && <span className="text-[var(--warning)] font-semibold">{message}</span>}
+                        {hoverCell && <HoverInfo placements={placementsAt(placements, hoverCell[0], hoverCell[1], level)} />}
                     </div>
                     <div className={view === "split" ? "flex-1 min-h-0 grid grid-rows-2 xl:grid-rows-1 xl:grid-cols-2" : "flex-1 min-h-0 flex"}>
                         {view !== "3d" && (
@@ -232,10 +263,12 @@ export function BuildPlanner() {
                                     selectedUid={selectedUid}
                                     tool={tool}
                                     cellSize={cellSize}
+                                    showSupports={showSupports}
                                     makeUid={makeUid}
                                     onPlace={handlePlace}
                                     onRemoveAt={handleRemoveAt}
                                     onSelectAt={handleSelectAt}
+                                    onHoverCell={setHoverCell}
                                 />
                             </div>
                         )}
@@ -243,6 +276,10 @@ export function BuildPlanner() {
                             <div className="min-h-0 flex-1 border-l border-[var(--border)] bg-[var(--background-deep)]">
                                 <View3D
                                     placements={placements}
+                                    tiers={layout?.tiers ?? []}
+                                    ports={ports}
+                                    showSupports={showSupports}
+                                    showLabels={showLabels}
                                     stepIndex={stepIndex}
                                     issuesByUid={issuesByUid}
                                     selectedUid={selectedUid}

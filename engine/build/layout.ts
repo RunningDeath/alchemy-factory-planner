@@ -7,7 +7,7 @@
  *   of another building directly below it.
  * - Ports connect when two neighbouring cells face each other with matching directions.
  */
-import { footprintCells, footprintPorts, getFootprint, oppositeSide, SIDE_OFFSET, type Rotation } from "./footprint";
+import { canSupport, footprintCells, footprintPorts, getFootprint, oppositeSide, SIDE_OFFSET, type Rotation } from "./footprint";
 import type { FootprintCell, FootprintPort, Side } from "./types";
 
 export interface Placement {
@@ -22,10 +22,16 @@ export interface Placement {
     nodeKey?: string;
     /** What a belt carries, for display */
     label?: string;
+    /** Generated belt lanes: feeding machines or collecting their output */
+    lane?: "in" | "out";
+    /** Generated block (index into the module's tiers) this building belongs to */
+    block?: number;
 }
 
 export interface WorldCell extends FootprintCell {
     uid: string;
+    /** Building id, for support rules */
+    id: string;
 }
 
 export interface WorldPort extends FootprintPort {
@@ -43,7 +49,7 @@ export const cellKey = (x: number, y: number, z: number) => `${x},${y},${z}`;
 export function placementCells(p: Placement): WorldCell[] {
     const fp = getFootprint(p.id);
     if (!fp) return [];
-    return footprintCells(fp, p.rot).map((c) => ({ ...c, x: c.x + p.x, y: c.y + p.y, z: c.z + p.z, uid: p.uid }));
+    return footprintCells(fp, p.rot).map((c) => ({ ...c, x: c.x + p.x, y: c.y + p.y, z: c.z + p.z, uid: p.uid, id: p.id }));
 }
 
 export function placementPorts(p: Placement): WorldPort[] {
@@ -91,7 +97,10 @@ export function placementIssues(p: Placement, occupancy: Map<string, WorldCell[]
         // Only the bottom of each column needs support; cells above rest on the building itself
         if (!unsupported && c.foundation && c.z > 0 && !own.has(cellKey(c.x, c.y, c.z - 1))) {
             const below = occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? [];
-            const supported = below.some((b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0);
+            const self = getFootprint(p.id)!;
+            const supported = below.some(
+                (b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0 && canSupport(getFootprint(b.id)!, self),
+            );
             if (!supported) unsupported = { kind: "unsupported", uid: p.uid, cell: [c.x, c.y, c.z] };
         }
     }

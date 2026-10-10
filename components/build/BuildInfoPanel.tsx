@@ -86,12 +86,12 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, onSelect, onG
                                 <span className="font-semibold text-[var(--text-primary)]">{t.itemName}</span>{" "}
                                 <span className="text-[var(--text-muted)]">
                                     · {t.machines}× {buildingName(t.deviceId)} · at {t.x ?? 0},{t.y ?? 0} · {t.width}×{t.depth}×{t.height}
-                                    {t.levels > 1 ? ` · ${t.levels} levels ${t.stacking === "metal-stand" ? "on metal stands" : "stacked"}` : ""}
+                                    {t.levels > 1 ? ` · ${t.levels} levels ${t.stacking === "beam-deck" ? "on beam decks" : "stacked directly"}` : ""}
                                 </span>
                             </button>
                             {t.lanes.map((lane, i) => (
                                 <span key={i} className={lane.overBelt ? "text-[var(--error)]" : "text-[var(--text-secondary)]"}>
-                                    {lane.kind === "in" ? "↓ in" : "↓ out"} x={(t.x ?? 0) + lane.x}
+                                    {lane.kind === "in" ? "in" : "out"} belt {i + 1}
                                     {t.levels > 1 ? ` (level ${lane.z})` : ""}: {formatRate(lane.rate)}/m{" "}
                                     <span className="text-[var(--text-muted)]">
                                         {lane.items.map((f) => f.itemName).join(" + ")}

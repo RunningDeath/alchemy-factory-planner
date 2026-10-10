@@ -6,7 +6,7 @@ import { beltPath, lPath } from "../../engine/build/edit";
 import { footprintPorts, getFootprint, rotatedSize, SIDE_OFFSET } from "../../engine/build/footprint";
 import { placementCells, placementIssues, type LayoutIssue, type Placement, type PortStatus, type WorldCell } from "../../engine/build/layout";
 import { QUAD, type Side } from "../../engine/build/types";
-import { buildingName, isMachine, placementColor } from "../../lib/buildCatalog";
+import { BELT_COLORS, beltColor, buildingName, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
 
 export interface BuildTool {
     id: string;
@@ -25,10 +25,13 @@ interface LayerGridProps {
     selectedUid: string | null;
     tool: BuildTool | null;
     cellSize: number;
+    /** Draw lab stands, metal stands and blocks */
+    showSupports: boolean;
     makeUid: () => string;
     onPlace: (placements: Placement[]) => void;
     onRemoveAt: (x: number, y: number) => void;
     onSelectAt: (x: number, y: number) => void;
+    onHoverCell?: (cell: [number, number] | null) => void;
 }
 
 const MARGIN = 4;
@@ -57,10 +60,12 @@ export function LayerGrid({
     selectedUid,
     tool,
     cellSize: cs,
+    showSupports,
     makeUid,
     onPlace,
     onRemoveAt,
     onSelectAt,
+    onHoverCell,
 }: LayerGridProps) {
     const [hover, setHover] = useState<[number, number] | null>(null);
     const [dragStart, setDragStart] = useState<[number, number] | null>(null);
@@ -156,9 +161,16 @@ export function LayerGrid({
             width={width}
             height={height}
             className="select-none block"
-            onMouseMove={(e) => setHover(cellFromEvent(e))}
+            onMouseMove={(e) => {
+                const cell = cellFromEvent(e);
+                if (!hover || hover[0] !== cell[0] || hover[1] !== cell[1]) {
+                    setHover(cell);
+                    onHoverCell?.(cell);
+                }
+            }}
             onMouseLeave={() => {
                 setHover(null);
+                onHoverCell?.(null);
                 setDragStart(null);
             }}
             onMouseDown={handleDown}
@@ -172,6 +184,9 @@ export function LayerGrid({
             <defs>
                 <pattern id="build-grid" width={cs} height={cs} patternUnits="userSpaceOnUse" x={0} y={0}>
                     <path d={`M ${cs} 0 L 0 0 0 ${cs}`} fill="none" stroke="var(--border-subtle)" strokeWidth={1} />
+                </pattern>
+                <pattern id="support-hatch" width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1={0} y1={0} x2={0} y2={6} stroke="#9a7a55" strokeWidth={2} />
                 </pattern>
             </defs>
             <rect width={width} height={height} fill="var(--background-deep)" />
@@ -188,6 +203,15 @@ export function LayerGrid({
             {here.map((c, i) => {
                 const p = byUid.get(c.uid);
                 if (!p) return null;
+                // Belts: dark track (the arrow on top shows direction and lane)
+                if (isBeltPiece(p.id)) {
+                    return <rect key={i} x={px(c.x) + 1} y={py(c.y) + 1} width={cs - 2} height={cs - 2} rx={3} fill={BELT_COLORS.track} />;
+                }
+                // Supports: hatched, so belts and machines stay readable
+                if (isSupport(p)) {
+                    if (!showSupports) return null;
+                    return <rect key={i} x={px(c.x) + 2} y={py(c.y) + 2} width={cs - 4} height={cs - 4} fill="url(#support-hatch)" opacity={0.55} />;
+                }
                 const color = placementColor(p, stepIndex);
                 const opacity = cellOpacity(c.layers) * (getFootprint(p.id)?.category === "floor" ? 0.45 : 1);
                 if (c.quads === QUAD.ALL) {
@@ -205,19 +229,22 @@ export function LayerGrid({
                 const size = rotatedSize(fp, p.rot);
                 const issues = issuesByUid.get(p.uid) ?? [];
                 const selected = p.uid === selectedUid;
-                const showLabel = isMachine(p) && p.z === level && size.x * cs >= 26;
+                const showLabel = isMachine(p) && p.z === level && size.x * cs >= 18;
+                const plain = (isBeltPiece(p.id) || isSupport(p)) && !selected && issues.length === 0;
+                if (isSupport(p) && !showSupports && !selected && issues.length === 0) return null;
                 return (
                     <g key={p.uid} pointerEvents="none">
-                        <rect
+                        {!plain && <rect
                             x={px(p.x) + 0.5}
                             y={py(p.y) + 0.5}
                             width={size.x * cs - 1}
                             height={size.y * cs - 1}
                             fill="none"
-                            stroke={selected ? "var(--accent-gold-bright)" : issues.length ? "var(--error)" : "rgba(0,0,0,0.35)"}
-                            strokeWidth={selected ? 2.5 : issues.length ? 2 : 1}
+                            stroke={selected ? "var(--accent-gold-bright)" : issues.length ? "var(--error)" : "rgba(0,0,0,0.6)"}
+                            strokeWidth={selected ? 2.5 : issues.length ? 2 : 1.5}
+                            rx={isMachine(p) ? 3 : 0}
                             strokeDasharray={issues.length && !selected ? "4 2" : undefined}
-                        />
+                        />}
                         {isBeltPiece(p.id) && <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} />}
                         {showLabel && (
                             <text
@@ -288,13 +315,14 @@ const SIDE_POINT: Record<Side, [number, number]> = {
 
 /** Lines from each input edge through the center to each output edge */
 function BeltArrows({ p, x, y, cs }: { p: Placement; x: number; y: number; cs: number }) {
+    const color = beltColor(p);
     const fp = getFootprint(p.id);
     if (!fp) return null;
     const ports = footprintPorts(fp, p.rot).filter((port) => port.face !== "top" && port.face !== "base");
     const cx = x + cs / 2;
     const cy = y + cs / 2;
     return (
-        <g stroke="#1a1208" strokeWidth={Math.max(1.5, cs / 10)} strokeLinecap="round" fill="none" opacity={0.85}>
+        <g stroke={color} strokeWidth={Math.max(1.5, cs / 9)} strokeLinecap="round" strokeLinejoin="round" fill="none">
             {ports.map((port, i) => {
                 const [sx, sy] = SIDE_POINT[port.face as Side];
                 // Port positions are local to the building

@@ -90,6 +90,24 @@ export function footprintCells(fp: BuildingFootprint, rot: Rotation = 0): Footpr
     return cells;
 }
 
+/** One cell tall, every cell carries what's above and needs support: grinder-sized machines that stack directly */
+export function isDirectlyStackable(fp: BuildingFootprint): boolean {
+    return fp.size.z === 1 && footprintCells(fp).every((c) => c.stackable && c.foundation);
+}
+
+const MACHINE_CATEGORIES = new Set(["production", "portal", "storage"]);
+
+/**
+ * Whether `supporter` can carry `supported` on top. Machines never stand on other
+ * machines (players use lab stands, beams, wood blocks or the stove), except
+ * grinder-sized machines, which stack directly. Matches the player blueprints.
+ */
+export function canSupport(supporter: BuildingFootprint, supported: BuildingFootprint): boolean {
+    if (!MACHINE_CATEGORIES.has(supporter.category)) return true;
+    if (!MACHINE_CATEGORIES.has(supported.category)) return true;
+    return isDirectlyStackable(supporter) && isDirectlyStackable(supported);
+}
+
 /** Ports in local (rotated) coordinates */
 export function footprintPorts(fp: BuildingFootprint, rot: Rotation = 0): FootprintPort[] {
     return fp.ports.map((p) => {

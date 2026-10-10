@@ -88,6 +88,8 @@ export function categoryFor(row: string, raw: RawBuilding): BuildingCategory | n
   if (raw.FurnitureType.endsWith('Pipeline')) return 'pipe';
   if (tags.includes('Building.Logistics.Logistics')) return 'logistics';
   if (tags.includes('Building.Logistics.Structure')) return 'structure';
+  // Building blocks are the other common support under raised machines and belts
+  if (/^(WoodBlock|StoneBlock|BrickBlock|IronBlock|MarbleBlock)$/.test(row)) return 'structure';
   if (tags.includes('Building.Logistics.Storage')) return 'storage';
   return null;
 }

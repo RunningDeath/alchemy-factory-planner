@@ -26,6 +26,10 @@ interface BuildToolbarProps {
     onViewChange: (view: BuildViewMode) => void;
     cutAbove: boolean;
     onCutAboveChange: (cut: boolean) => void;
+    showSupports: boolean;
+    onShowSupportsChange: (show: boolean) => void;
+    showLabels: boolean;
+    onShowLabelsChange: (show: boolean) => void;
     onUndo: () => void;
     onRedo: () => void;
 }
@@ -102,6 +106,14 @@ export function BuildToolbar(props: BuildToolbarProps) {
 
             <div className="flex-1" />
 
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Show lab stands, metal stands and blocks">
+                <input type="checkbox" checked={props.showSupports} onChange={(e) => props.onShowSupportsChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
+                Supports
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Names of blocks and the items going in and out, in 3D">
+                <input type="checkbox" checked={props.showLabels} onChange={(e) => props.onShowLabelsChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
+                Labels
+            </label>
             <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Hide everything above the current level in 3D">
                 <input type="checkbox" checked={props.cutAbove} onChange={(e) => props.onCutAboveChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
                 Cut 3D at level

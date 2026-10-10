@@ -13,15 +13,17 @@
  * output lanes merge machine outputs and leave at the bottom edge. Machines per lane
  * are capped so a lane never carries more than one belt.
  *
- * Blocks go up in levels, using only what the game allows: machines that can stand
- * on each other (grinders, ...) stack directly, others stand on metal stands over
- * the machine below (like nursery → stand → nursery). Upper belts rest on the stands
- * or on frame columns. Blocks sit side by side on the ground; connecting them to each
- * other is left to the player.
+ * Blocks go up in levels the way players build them: grinder-sized machines stack
+ * directly; everything else stands on a deck of beams laid across its column, with
+ * lab stand pillars at the beam ends. Upper belts rest on the beams, on lab stands or
+ * on wood blocks. Blocks are packed tightly on the ground (turned where that saves
+ * space), each with a free row on its input side for bringing belts in. Connecting
+ * the blocks to each other is left to the player.
  */
 import { beltPieceFor } from "./belt-pieces";
-import { footprintCells, footprintPorts, getFootprint, oppositeSide, rotatedSize, type Rotation } from "./footprint";
-import { buildOccupancy, cellKey, placementIssues, placementPorts, validateLayout, type Placement, type WorldCell } from "./layout";
+import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, type Rotation } from "./footprint";
+import { buildOccupancy, cellKey, placementIssues, placementPorts, type Placement, type WorldCell } from "./layout";
+import { packBlocks, transformBlock } from "./packing";
 import type { BuildingFootprint, Side } from "./types";
 
 export interface StepFlow {
@@ -80,18 +82,20 @@ export interface TierInfo {
     itemName: string;
     deviceId: string;
     machines: number;
-    /** Block origin on the ground */
+    /** Block origin on the ground (including its free input row) */
     x: number;
     y: number;
     z: number;
     height: number;
     width: number;
     depth: number;
+    /** Turned a quarter: lanes run along x instead of y */
+    turned: boolean;
     columns: number;
     rows: number;
     levels: number;
     /** How upper levels are carried */
-    stacking: "none" | "direct" | "metal-stand";
+    stacking: "none" | "direct" | "beam-deck";
     lanes: LaneInfo[];
     fluidInputs: string[];
     /** Machine ports above the lane level that need a manual connection */
@@ -104,9 +108,8 @@ export interface GeneratedModule {
     size: [number, number, number];
 }
 
-const STAND_ID = "metal-stand";
 const FRAME_ID = "frame-single";
-const STAND_SIZE = 3;
+const BLOCK_ID = "wood-block";
 
 /** Turn the machine so most inputs face left and outputs face right */
 export function machineRotation(fp: BuildingFootprint): Rotation {
@@ -125,41 +128,38 @@ export function machineRotation(fp: BuildingFootprint): Rotation {
     return best;
 }
 
-/** One cell tall, every cell carries what's above and needs support: these stack directly */
-export function isDirectlyStackable(fp: BuildingFootprint): boolean {
-    const cells = footprintCells(fp);
-    return fp.size.z === 1 && cells.every((c) => c.stackable && c.foundation);
-}
 
 export interface Stacking {
-    kind: "none" | "direct" | "metal-stand";
+    kind: "none" | "direct" | "beam-deck";
     /** Height from one level to the next */
     pitch: number;
-    /** Metal stand height above the lower machine's base */
-    standOffset: number;
+    /** Beam deck: the beam that spans one column from lane to lane, and its length */
+    beamId?: string;
+    beamLength?: number;
 }
 
+/** Beams the game offers, by length (they need support at both ends only) */
+const BEAMS: [number, string][] = [
+    [3, "beam3"],
+    [5, "beam5"],
+    [10, "beam10"],
+    [18, "beam18"],
+];
+
 /**
- * How this machine goes up a level: directly on itself, on a metal stand over the
- * machine below (tested against the game's occupation rules), or not at all.
+ * How this machine goes up a level, the way players build it: grinder-sized machines
+ * directly on each other; everything else on a deck of beams laid across the column
+ * (lane to lane) with lab stand pillars at the ends, like the player blueprints.
  */
 export function stackingFor(fp: BuildingFootprint, rot: Rotation): Stacking {
-    if (isDirectlyStackable(fp)) return { kind: "direct", pitch: fp.size.z, standOffset: 0 };
-    const size = rotatedSize(fp, rot);
-    if (size.x >= 2 && size.x <= STAND_SIZE && size.y <= STAND_SIZE) {
-        for (let offset = 0; offset <= 2; offset++) {
-            const fits = ([rot, ((rot + 2) % 4) as Rotation] as Rotation[]).every(
-                (r) =>
-                    validateLayout([
-                        { uid: "a", id: fp.id, x: 0, y: 0, z: 0, rot: r },
-                        { uid: "s", id: STAND_ID, x: 0, y: 0, z: offset, rot: 0 },
-                        { uid: "b", id: fp.id, x: 0, y: 0, z: offset + STAND_SIZE, rot: r },
-                    ]).length === 0,
-            );
-            if (fits) return { kind: "metal-stand", pitch: offset + STAND_SIZE, standOffset: offset };
-        }
+    if (isDirectlyStackable(fp)) return { kind: "direct", pitch: fp.size.z };
+    const { x: sx } = rotatedSize(fp, rot);
+    const beam = BEAMS.find(([length]) => length >= sx + 2 && length <= sx + 4);
+    if (beam && getFootprint(beam[1])) {
+        // The deck sits right above the machine (including its partly used top cell)
+        return { kind: "beam-deck", pitch: fp.size.z + 1, beamId: beam[1], beamLength: beam[0] };
     }
-    return { kind: "none", pitch: fp.size.z, standOffset: 0 };
+    return { kind: "none", pitch: fp.size.z };
 }
 
 interface TierShape {
@@ -171,6 +171,8 @@ interface TierShape {
     depth: number;
     rowPitch: number;
     columnPitch: number;
+    /** Upper levels stand on beams laid across each column */
+    deck: boolean;
 }
 
 function laneCapacity(flows: StepFlow[], beltSpeed: number): number {
@@ -189,21 +191,23 @@ function* tierShapes(step: ModuleStep, fp: BuildingFootprint, rot: Rotation, sta
     const { x: sx, y: sy } = rotatedSize(fp, rot);
     const cap = Math.max(1, Math.min(laneCapacity(step.inputs, opts.beltSpeed), laneCapacity(step.outputs, opts.beltSpeed)));
     const maxLevels = maxLevelsFor(fp, stacking, opts);
-    // A stand is 3 × 3, so rows of stand-stacked machines are at least 3 apart
-    const rowPitch = stacking.kind === "metal-stand" ? Math.max(sy, STAND_SIZE) : sy;
+    const rowPitch = sy;
 
     // Sharing a lane between two columns saves width but doubles the lane's load
     for (const shared of cap >= 2 ? [true, false] : [false]) {
-        const columnPitch = shared ? sx + 1 : sx + 2;
-        if (stacking.kind === "metal-stand" && columnPitch < STAND_SIZE) continue;
         for (let levels = 1; levels <= maxLevels; levels++) {
+            // A beam deck spans one column on its own, so stacked columns don't share lanes
+            const deck = levels > 1 && stacking.kind === "beam-deck";
+            if (deck && shared) continue;
+            const columnPitch = deck ? stacking.beamLength! : shared ? sx + 1 : sx + 2;
             for (let columns = 1; ; columns++) {
                 const width = shared ? columns * columnPitch + 1 : columns * columnPitch;
                 if (width > opts.maxWidth && columns > 1) break;
                 const maxRowsByLane = shared && columns > 1 ? Math.floor(cap / 2) : cap;
-                const maxRowsByDepth = Math.floor((opts.maxDepth - 2 - sy) / rowPitch) + 1;
+                // Entry row, exit row and the free row in front of the block
+                const maxRowsByDepth = Math.floor((opts.maxDepth - 3 - sy) / rowPitch) + 1;
                 const rows = Math.max(1, Math.min(maxRowsByLane, maxRowsByDepth));
-                yield { columns, rows, levels, shared, width, depth: (rows - 1) * rowPitch + sy + 2, rowPitch, columnPitch };
+                yield { columns, rows, levels, shared, width, depth: (rows - 1) * rowPitch + sy + 2, rowPitch, columnPitch, deck };
                 if (width > opts.maxWidth) break;
             }
         }
@@ -255,10 +259,13 @@ function supportColumn(placements: Placement[], x: number, y: number, z: number,
     let occupancy = buildOccupancy(placements);
     for (let fz = z - 1; fz >= groundZ; fz--) {
         if (isSupported(occupancy, x, y, fz + 1, groundZ)) break;
-        const frame: Placement = { uid: nextUid("f"), id: FRAME_ID, x, y, z: fz, rot: 0 };
+        // Lab stand first (it shares its cell with a belt), wood block where that doesn't fit
+        const support = [FRAME_ID, BLOCK_ID]
+            .map((id): Placement => ({ uid: nextUid("f"), id, x, y, z: fz, rot: 0 }))
+            .find((p) => !placementIssues(p, occupancy).some((i) => i.kind === "collision"));
         // A leg or stand top in the way: leave it unsupported, the checks will show it
-        if (placementIssues(frame, occupancy).some((i) => i.kind === "collision")) break;
-        frames.push(frame);
+        if (!support) break;
+        frames.push(support);
         occupancy = buildOccupancy([...placements, ...frames]);
     }
     return frames;
@@ -275,9 +282,10 @@ function buildTier(
     index: number,
     beltSpeed: number,
 ): { placements: Placement[]; info: TierInfo } {
-    const { z: sz } = rotatedSize(fp, rot);
+    const { y: sy, z: sz } = rotatedSize(fp, rot);
     const placements: Placement[] = [];
     const machines: Placement[] = [];
+    const decks: Placement[] = [];
     const levelZ = (level: number) => origin.z + level * stacking.pitch;
 
     // Machines: level by level, column by column, row by row (lower levels fill first)
@@ -288,8 +296,12 @@ function buildTier(
             const x = origin.x + col * shape.columnPitch + 1;
             for (let row = 0; row < shape.rows && placed < count; row++) {
                 const y = origin.y + 1 + row * shape.rowPitch;
-                if (level > 0 && stacking.kind === "metal-stand") {
-                    placements.push({ uid: nextUid("s"), id: STAND_ID, x, y, z: levelZ(level - 1) + stacking.standOffset, rot: 0 });
+                if (level > 0 && shape.deck) {
+                    // One beam per machine row, across the column from the input lane on
+                    const deckZ = levelZ(level) - 1;
+                    for (let r = 0; r < sy; r++) {
+                        decks.push({ uid: nextUid("d"), id: stacking.beamId!, x: x - 1, y: y + r, z: deckZ, rot: 1 });
+                    }
                 }
                 machines.push({
                     uid: nextUid("m"),
@@ -305,7 +317,7 @@ function buildTier(
             }
         }
     }
-    placements.push(...machines);
+    placements.push(...machines, ...decks);
 
     // Which lane cells machine ports point at, per level
     const lanes: LaneInfo[] = [];
@@ -351,7 +363,9 @@ function buildTier(
                 if (y > yStart || feeds) ins.push("up");
                 if (y < yEnd || collects) outs.push("down");
                 const piece = beltPieceFor(ins, outs) ?? beltPieceFor(["up"], ["down"])!;
-                belts.push({ uid: nextUid("b"), id: piece.id, x: laneX, y, z, rot: piece.rot, nodeKey: step.nodeKey });
+                const lane = feeds ? "in" : "out";
+                const label = (lane === "in" ? step.inputs : step.outputs).map((fl) => fl.itemName).join(" + ");
+                belts.push({ uid: nextUid("b"), id: piece.id, x: laneX, y, z, rot: piece.rot, nodeKey: step.nodeKey, lane, label });
             }
 
             const lanesMachines = (pick: "ins" | "outs") =>
@@ -362,7 +376,11 @@ function buildTier(
     }
     placements.push(...belts);
 
-    // Upper belts rest on stand tops where they reach over a lane; elsewhere on frame columns
+    // Beam ends rest on lab stand pillars; upper belts rest on beams, elsewhere on pillars too
+    for (const d of [...decks].sort((a, c) => a.z - c.z)) {
+        const length = stacking.beamLength!;
+        for (const endX of [d.x, d.x + length - 1]) placements.push(...supportColumn(placements, endX, d.y, d.z, origin.z));
+    }
     for (const b of belts.filter((bb) => bb.z > origin.z).sort((a, c) => a.z - c.z)) {
         placements.push(...supportColumn(placements, b.x, b.y, b.z, origin.z));
     }
@@ -381,10 +399,11 @@ function buildTier(
             height: (levelsUsed - 1) * stacking.pitch + sz,
             width: shape.width,
             depth: shape.depth,
+            turned: false,
             columns: Math.min(shape.columns, Math.ceil(count / (shape.rows * shape.levels)) || 1),
             rows: shape.rows,
             levels: levelsUsed,
-            stacking: levelsUsed > 1 ? stacking.kind : "none",
+            stacking: levelsUsed > 1 ? (shape.deck ? "beam-deck" : stacking.kind) : "none",
             lanes,
             fluidInputs: step.fluidInputs,
             offLanePorts,
@@ -398,13 +417,9 @@ function laneInfo(kind: "in" | "out", x: number, level: number, z: number, flows
     return { kind, x, level, z, items, rate, overBelt: rate > beltSpeed + 1e-6 };
 }
 
-/** Lay every step out as blocks side by side on the ground, wrapping into rows */
+/** Lay every step out as blocks and pack them tightly on the ground */
 export function generateModule(steps: ModuleStep[], options: ModuleOptions): GeneratedModule {
-    const placements: Placement[] = [];
-    const tiers: TierInfo[] = [];
-    let cursorX = 0;
-    let cursorY = 0;
-    let rowDepth = 0;
+    const blocks: { placements: Placement[]; info: TierInfo }[] = [];
 
     for (const step of steps) {
         const fp = getFootprint(step.deviceId);
@@ -421,21 +436,34 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
         for (let t = 0; t < blockCount; t++) {
             const n = Math.floor(count / blockCount) + (t < count % blockCount ? 1 : 0);
             const shape = chooseShape(step, n, fp, rot, stacking, options);
-            if (cursorX > 0 && cursorX + shape.width > options.maxWidth) {
-                cursorX = 0;
-                cursorY += rowDepth;
-                rowDepth = 0;
-            }
-            const block = buildTier(step, n, shape, fp, rot, stacking, { x: cursorX, y: cursorY, z: 0 }, tiers.length, options.beltSpeed);
-            placements.push(...block.placements);
-            tiers.push(block.info);
-            cursorX += shape.width;
-            rowDepth = Math.max(rowDepth, shape.depth);
+            // Row 0 stays free so belts can be brought to the input lanes
+            const block = buildTier(step, n, shape, fp, rot, stacking, { x: 0, y: 1, z: 0 }, blocks.length, options.beltSpeed);
+            block.info.y = 0;
+            block.info.depth = shape.depth + 1;
+            block.placements = block.placements.map((p) => ({ ...p, block: blocks.length }));
+            blocks.push(block);
         }
     }
 
-    const width = Math.max(0, ...tiers.map((t) => t.x + t.width));
-    const depth = Math.max(0, ...tiers.map((t) => t.y + t.depth));
+    const packed = packBlocks(
+        blocks.map((b) => ({ width: b.info.width, depth: b.info.depth })),
+        options.maxWidth,
+    );
+    const placements: Placement[] = [];
+    const tiers = blocks.map((b, i) => {
+        const pos = packed.positions[i];
+        placements.push(...transformBlock(b.placements, b.info.depth, pos.rot, pos.x, pos.y));
+        const turned = pos.rot === 1;
+        return {
+            ...b.info,
+            x: pos.x,
+            y: pos.y,
+            width: turned ? b.info.depth : b.info.width,
+            depth: turned ? b.info.width : b.info.depth,
+            turned,
+        };
+    });
+
     const height = Math.max(0, ...tiers.map((t) => t.z + t.height));
-    return { placements, tiers, size: [width, depth, height] };
+    return { placements, tiers, size: [packed.width, packed.depth, height] };
 }

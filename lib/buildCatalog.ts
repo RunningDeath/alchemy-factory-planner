@@ -71,6 +71,17 @@ export function placementColor(p: Placement, stepIndex: Map<string, number>): st
     return CATEGORY_COLORS[fp?.category ?? "logistics"];
 }
 
+/** Belt arrows: blue for lanes feeding machines, orange for lanes collecting output, grey for hand-drawn belts */
+export const BELT_COLORS = { in: "#5fb8f0", out: "#f0a040", manual: "#c8c0d8", track: "#2b2540" } as const;
+
+export function beltColor(p: Placement): string {
+    return p.lane ? BELT_COLORS[p.lane] : BELT_COLORS.manual;
+}
+
+export function isSupport(p: Placement): boolean {
+    return getFootprint(p.id)?.category === "structure";
+}
+
 export function isMachine(p: Placement): boolean {
     const category = getFootprint(p.id)?.category;
     return category === "production" || category === "heating" || category === "portal";
