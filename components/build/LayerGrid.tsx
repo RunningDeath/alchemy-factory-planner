@@ -7,7 +7,8 @@ import { footprintPorts, getFootprint, rotatedSize, SIDE_OFFSET } from "../../en
 import { placementCells, placementIssues, type LayoutIssue, type Placement, type PortStatus, type WorldCell } from "../../engine/build/layout";
 import { QUAD, type Side } from "../../engine/build/types";
 import { placementsAt } from "../../engine/build/edit";
-import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
+import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, itemIdByName, placementColor } from "../../lib/buildCatalog";
+import { gameIconUrl, useGameIcons } from "../../lib/gameIcons";
 
 export interface BuildTool {
     id: string;
@@ -72,6 +73,7 @@ export function LayerGrid({
     onHoverCell,
 }: LayerGridProps) {
     const [hover, setHover] = useState<[number, number] | null>(null);
+    const icons = useGameIcons();
     /** Cells the mouse passed over while drawing a belt, in order */
     const [dragPath, setDragPath] = useState<[number, number][] | null>(null);
 
@@ -182,6 +184,14 @@ export function LayerGrid({
         return carriedItem(p) === highlightItem ? 1 : 0.18;
     }
 
+    /** The exported game icon of what a production machine makes, if there is one */
+    function productIcon(p: Placement): string | null {
+        if (getFootprint(p.id)?.category !== "production") return null;
+        const item = carriedItem(p);
+        const id = item ? itemIdByName(item) : undefined;
+        return id ? gameIconUrl(icons, "items", id) : null;
+    }
+
     const hovered = hover && !tool ? placementsAt(placements, hover[0], hover[1], level) : [];
 
     return (
@@ -289,7 +299,17 @@ export function LayerGrid({
                             strokeDasharray={issues.length && !selected ? "4 2" : undefined}
                         />}
                         {isBeltPiece(p.id) && <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} color={placementColor(p, itemColors)} opacity={dim(p)} />}
-                        {showLabel && (
+                        {showLabel && productIcon(p) ? (
+                            <MachineIcons
+                                x={px(p.x)}
+                                y={py(p.y)}
+                                w={size.x * cs}
+                                h={size.y * cs}
+                                product={productIcon(p)!}
+                                machine={gameIconUrl(icons, "buildings", p.id)}
+                                opacity={dim(p)}
+                            />
+                        ) : showLabel && (
                             <text
                                 x={px(p.x) + (size.x * cs) / 2}
                                 y={py(p.y) + (size.y * cs) / 2}
@@ -341,6 +361,18 @@ export function LayerGrid({
                 })}
         </svg>
         </div>
+    );
+}
+
+/** The product's icon in the middle of the machine, the machine's own icon small in a corner */
+function MachineIcons({ x, y, w, h, product, machine, opacity }: { x: number; y: number; w: number; h: number; product: string; machine: string | null; opacity: number }) {
+    const s = Math.min(w, h) * 0.7;
+    const m = Math.min(w, h) * 0.38;
+    return (
+        <g opacity={opacity}>
+            <image href={product} x={x + (w - s) / 2} y={y + (h - s) / 2} width={s} height={s} />
+            {machine && Math.min(w, h) >= 40 && <image href={machine} x={x + w - m - 2} y={y + h - m - 2} width={m} height={m} />}
+        </g>
     );
 }
 

@@ -13,6 +13,13 @@ export function itemDisplayName(itemId: string): string {
     return itemNames.get(itemId) ?? itemId;
 }
 
+const itemIds = new Map([...itemNames].map(([id, name]) => [name, id]));
+
+/** Item id for a display name (placements carry names); names are unique in items.json */
+export function itemIdByName(name: string): string | undefined {
+    return itemIds.get(name);
+}
+
 /** Parts the game names only internally */
 const NAME_OVERRIDES: Record<string, string> = {
     "conveyer-lift-body": "Conveyor Lifter (shaft)",
