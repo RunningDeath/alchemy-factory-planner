@@ -1,6 +1,7 @@
 // Exports the game's item and building icons as small PNGs for the 3D build view:
 //   <repo>/public/game-icons/items/<item id>.png      (ids from data/items.json)
 //   <repo>/public/game-icons/buildings/<building id>.png (ids from data/building-footprints.json)
+//   <repo>/public/game-icons/manifest.json               ({ items, buildings }: the ids written)
 // Building icons come from DT_Buildings.DisplayIcon. Items have no data table in the paks, so
 // their icon paths come from the AlchemyFactoryData items.json (the same source scripts/sync-data.ts
 // uses; its "name" lowercased is our item id). These are game assets: they're gitignored.
@@ -25,20 +26,21 @@ static class Icons
         // building row name → our id (data/building-footprints.json carries both)
         var buildingIds = JArray.Parse(File.ReadAllText(Path.Combine(data, "building-footprints.json")))
             .ToDictionary(b => (string)b["row"]!, b => (string)b["id"]!, StringComparer.OrdinalIgnoreCase);
-        var buildings = 0;
+        var buildings = new List<string>();
         foreach (var (row, fields) in buildingRows)
         {
             if (!buildingIds.TryGetValue(row, out var id)) continue;
-            UTexture2D? tex = null;
-            if (fields.TryGetValue(out FSoftObjectPath soft, "DisplayIcon") && !soft.AssetPathName.IsNone) soft.TryLoad(out tex);
-            else fields.TryGetValue(out tex, "DisplayIcon");
-            if (tex != null && Save(tex, Path.Combine(outDir, "buildings", $"{id}.png"))) buildings++;
+            // DisplayIcon is a soft reference in current builds; older ones held the texture directly
+            var tex = fields.TryGetValue(out FSoftObjectPath soft, "DisplayIcon") && !soft.AssetPathName.IsNone && provider.TryLoadPackageObject<UTexture2D>(soft.AssetPathName.Text, out var loaded)
+                ? loaded
+                : fields.GetOrDefault<UTexture2D?>("DisplayIcon");
+            if (tex != null && Save(tex, Path.Combine(outDir, "buildings", $"{id}.png"))) buildings.Add(id);
         }
 
         var itemIds = JArray.Parse(File.ReadAllText(Path.Combine(data, "items.json"))).Select(i => (string)i["id"]!).ToHashSet();
         using var http = new HttpClient();
         var remote = JArray.Parse(await http.GetStringAsync(RemoteItems));
-        var items = 0;
+        var items = new List<string>();
         var missing = new List<string>(itemIds);
         foreach (var item in remote)
         {
@@ -48,12 +50,14 @@ static class Icons
             var asset = $"AlchemyFactory/Content/Arts/UI{icon}.{icon[(icon.LastIndexOf('/') + 1)..]}";
             if (provider.TryLoadPackageObject<UTexture2D>(asset, out var tex) && Save(tex, Path.Combine(outDir, "items", $"{id}.png")))
             {
-                items++;
+                items.Add(id);
                 missing.Remove(id);
             }
         }
 
-        Console.WriteLine($"Wrote {buildings} building icons and {items} item icons to {outDir}");
+        // The app reads this first, so it only requests icons that exist
+        File.WriteAllText(Path.Combine(outDir, "manifest.json"), new JObject { ["items"] = new JArray(items.Order()), ["buildings"] = new JArray(buildings.Order()) }.ToString());
+        Console.WriteLine($"Wrote {buildings.Count} building icons and {items.Count} item icons to {outDir}");
         if (missing.Count > 0) Console.WriteLine($"No icon for items: {string.Join(", ", missing)}");
         return 0;
     }
