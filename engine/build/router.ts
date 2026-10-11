@@ -313,7 +313,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
     const inBounds = (c: Cell) => c[0] >= minX && c[0] <= maxX && c[1] >= minY && c[1] <= maxY && c[2] >= 0 && c[2] <= maxZ;
-    const onEdge = (c: Cell) => c[2] === 0 && (c[0] === minX || c[0] === maxX || c[1] === minY || c[1] === maxY);
+    // Modules stand side by side in a line: belts come in and leave only at the front and back
+    const onEdge = (c: Cell) => c[2] === 0 && (c[1] === minY || c[1] === maxY);
 
     const nodes = new Map<string, RouteNode>();
     const reserved = new Set<string>(); // lift columns and lane-end port cells of other connections
@@ -666,9 +667,6 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             for (let x = minX; x <= maxX; x++) {
                 starts.push({ cell: [x, minY, 0], inSide: "up", edge: true, extra }, { cell: [x, maxY, 0], inSide: "down", edge: true, extra });
             }
-            for (let y = minY + 1; y < maxY; y++) {
-                starts.push({ cell: [minX, y, 0], inSide: "left", edge: true, extra }, { cell: [maxX, y, 0], inSide: "right", edge: true, extra });
-            }
         } else {
             const from = conn.from;
             if (!exitUsed.has(from.uid)) starts.push({ cell: from.port, inSide: oppositeSide(from.dir) });
@@ -687,10 +685,10 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         let estimate: (c: Cell) => number;
         if (conn.to === "export") {
             const exportTrees = [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}` && !n.lift && n.items.size === 1);
-            estimate = (c) => Math.min(c[0] - minX, maxX - c[0], c[1] - minY, maxY - c[1]) + c[2];
+            estimate = (c) => Math.min(c[1] - minY, maxY - c[1]) + c[2];
             goal = (cell, heading) => {
                 const nextCell = add(cell, heading);
-                if (onEdge(cell) && !inBounds(nextCell)) return { kind: "edge" };
+                if (onEdge(cell) && (nextCell[1] < minY || nextCell[1] > maxY)) return { kind: "edge" };
                 const m = nodes.get(keyOf(nextCell));
                 if (m && exportTrees.includes(m) && (treeTotals.get(m.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6 && canAdd(m, oppositeSide(heading), "in")) {
                     return { kind: "merge", node: m, side: oppositeSide(heading) };

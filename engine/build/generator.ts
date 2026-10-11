@@ -357,6 +357,8 @@ function* tierShapes(step: ModuleStep, fp: BuildingFootprint, rot: Rotation, sta
 }
 
 /** Smallest footprint for n machines, or the biggest shape when n doesn't fit in one block */
+const MIN_PER_DECK_LEVEL = 2;
+
 function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Rotation, stacking: Stacking, opts: ModuleOptions): TierShape {
     const { y: sy } = rotatedSize(fp, rot);
     let best: TierShape | null = null;
@@ -367,6 +369,9 @@ function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Ro
         const capacity = shape.columns * shape.rows * shape.levels;
         if (!biggest || capacity > biggest.columns * biggest.rows * biggest.levels) biggest = shape;
         if (capacity < n) continue;
+        // A beam deck with its pillars and raised lanes isn't worth it for one machine a level
+        // (the block can still go on top of another one as a whole)
+        if (shape.deck && n < shape.levels * MIN_PER_DECK_LEVEL) continue;
         // Trim rows to what n needs
         const rows = Math.ceil(n / (shape.columns * shape.levels));
         const trimmed = { ...shape, rows, depth: blockDepth(rows, sy, shape.rowPitch, step.heating) + filterRows(step) };

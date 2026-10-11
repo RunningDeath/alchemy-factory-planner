@@ -228,8 +228,9 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
                 for (let dy = ys[0]; dy <= ys[1]; dy++) {
                     const fit = mount(tower, top, upper, dx, dy, opts);
                     if (!fit) continue;
-                    const width = Math.max(tower.width, dx + upper.width) - Math.min(0, dx);
-                    const depth = Math.max(tower.depth, dy + upper.depth) - Math.min(0, dy);
+                    const reach = bounds([...fit.moved, ...fit.supports]);
+                    const width = Math.max(tower.width, dx + upper.width, reach.maxX + 1) - Math.min(0, dx, reach.minX);
+                    const depth = Math.max(tower.depth, dy + upper.depth, reach.maxY + 1) - Math.min(0, dy, reach.minY);
                     const saved = tower.width * tower.depth + area - width * depth;
                     if (saved < area * MIN_SAVING) continue;
                     const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST - buriedEnds(tower, fit) * BURIED_END_COST;
@@ -247,8 +248,9 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
         towers[t] = {
             members: members.map((m) => ({ ...m, dx: m.dx - ox, dy: m.dy - oy })),
             placements: shift(all, -ox, -oy, 0),
-            width: Math.max(tower.width, dx + upper.width) - ox,
-            depth: Math.max(tower.depth, dy + upper.depth) - oy,
+            // Deck beams may reach past both blocks
+            width: Math.max(tower.width, dx + upper.width, b.maxX + 1) - ox,
+            depth: Math.max(tower.depth, dy + upper.depth, b.maxY + 1) - oy,
         };
         towers[i] = null;
     }
