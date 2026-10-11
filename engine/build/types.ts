@@ -78,6 +78,13 @@ export interface BuildingFootprint {
     heatCost?: number;
     /** Variant only reachable through another building's build option (e.g. mirrored) */
     hidden?: boolean;
+    /**
+     * Cell of the game's building origin when it isn't 0,0,0 (a few buildings, e.g. beams,
+     * extend into negative grid offsets). Blueprints position buildings by this cell.
+     */
+    origin?: [number, number, number];
+    /** The game's ESecondaryType when not None (Belt, Pipeline, ConveyerLift, BeltSlope, ...) */
+    secondary?: string;
     /** Alternative build option, e.g. the mirrored version */
     alt?: string;
 }
