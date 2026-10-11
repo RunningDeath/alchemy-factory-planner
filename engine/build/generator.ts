@@ -31,7 +31,7 @@ import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
 import deviceMetadata from "../../data/device-metadata.json";
-import { flowRows, nearFeeders, packBlocks, transformBlock } from "./packing";
+import { flowRows, nearFeeders, packBlocks, transformBlock, type PackedItem } from "./packing";
 
 /** near: next to the feeding blocks; flow: rows by production stage; packed: tightest fit */
 type LayoutMode = "near" | "flow" | "packed";
@@ -1132,7 +1132,7 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         options.stackBlocks === false || !can.lifts
             ? singles
             : buildTowers(
-                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL })),
+                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL, canCarry: b.info.deviceId !== PURCHASING_PORTAL })),
                   { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
               );
     // Stacked towers first; side by side only when the towers can't be belted together
@@ -1207,12 +1207,36 @@ function layOut(
 ): GeneratedModule {
     const pad = corridor * 2;
     const sizes = towers.map((t) => ({ width: t.width + pad, depth: t.depth + pad }));
-    const packed =
+    // Purchasing portals line up along the front, where the coins come in; the rest packs behind them
+    const isPortal = (t: Tower) => t.members.every((m) => blocks[m.index].info.deviceId === PURCHASING_PORTAL);
+    const front = towers.map((t, i) => (isPortal(t) ? i : -1)).filter((i) => i >= 0);
+    const rest = towers.map((_, i) => i).filter((i) => !front.includes(i));
+    const restIndex = new Map(rest.map((i, k) => [i, k]));
+    const restItems = rest.map((i) => {
+        const keep = flow[i].feeders.map((f, k) => [f, flow[i].feederWeights[k]] as const).filter(([f]) => restIndex.has(f));
+        return { ...sizes[i], stage: flow[i].stage, feeders: keep.map(([f]) => restIndex.get(f)!), feederWeights: keep.map(([, w]) => w) };
+    });
+    const restPacked =
         mode === "near"
-            ? nearFeeders(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad)
+            ? nearFeeders(restItems, options.maxWidth + pad)
             : mode === "flow"
-              ? flowRows(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad, 0, 1)
-              : packBlocks(sizes, options.maxWidth + pad);
+              ? flowRows(restItems, options.maxWidth + pad, 0, 1)
+              : packBlocks(restItems, options.maxWidth + pad);
+    const positions: PackedItem[] = new Array(towers.length);
+    const frontDepth = front.length ? Math.max(...front.map((i) => sizes[i].depth)) : 0;
+    rest.forEach((i, k) => (positions[i] = { ...restPacked.positions[k], y: restPacked.positions[k].y + frontDepth }));
+    // Each portal as close as it gets to the blocks it feeds, left to right without overlap
+    const wantX = (i: number) => {
+        const fed = rest.filter((j) => flow[j].feeders.includes(i));
+        return fed.length ? Math.min(...fed.map((j) => positions[j].x)) : 0;
+    };
+    let cursor = 0;
+    for (const i of [...front].sort((a, b) => wantX(a) - wantX(b))) {
+        const x = Math.max(cursor, wantX(i));
+        positions[i] = { x, y: 0, rot: 0 };
+        cursor = x + sizes[i].width;
+    }
+    const packed = { positions };
     const blockPlacements: Placement[] = [];
     const tiers: TierInfo[] = new Array(blocks.length);
     towers.forEach((tower, ti) => {

@@ -31,6 +31,8 @@ export interface TowerBlock {
     depth: number;
     /** Heated blocks need their platform on the ground */
     canGoUp: boolean;
+    /** Others may stand on it (purchasing portals stay free, in the front row) */
+    canCarry?: boolean;
 }
 
 interface TowerOptions {
@@ -225,7 +227,7 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
 
         for (let t = 0; t < towers.length; t++) {
             const tower = towers[t];
-            if (!tower || t === i) continue;
+            if (!tower || t === i || tower.members.some((m) => blocks[m.index].canCarry === false)) continue;
             const top = topMap(tower.placements);
             const blockedBefore = blockedEnds([...tower.placements, ...upper.placements.map((p) => ({ ...p, x: p.x + 10000 }))]);
             const related = tower.members.some((m) => opts.related(m.index, i));
