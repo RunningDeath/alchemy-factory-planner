@@ -82,6 +82,10 @@ export function BuildToolbar(props: BuildToolbarProps) {
                 <input type="checkbox" checked={options.stackBlocks !== false} onChange={(e) => onOptionsChange({ ...options, stackBlocks: e.target.checked })} className="accent-[var(--accent-gold)]" />
                 Stack blocks
             </label>
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Purchasing portals next to the machines that use raw materials (logs, limestone, ores, seeds), all paid through one coin belt from outside. Needs the purchasing portal unlock; otherwise raw materials come in at the edge.">
+                <input type="checkbox" checked={options.buyRaw !== false} onChange={(e) => onOptionsChange({ ...options, buyRaw: e.target.checked })} className="accent-[var(--accent-gold)]" />
+                Buy raw materials in the module
+            </label>
             <label className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]" title="Where output nobody in the module needs goes (byproducts, overflow), so it doesn't block the belts. Auto: knowledge altar, else trash barrel, else dispatch portal, whichever is unlocked">
                 Leftovers
                 <select

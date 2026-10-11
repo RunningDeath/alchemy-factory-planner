@@ -52,6 +52,7 @@ export const OPTIONAL_BUILDINGS = [
     { id: "knowledge-altar", label: "Knowledge Altars", what: "turning byproducts nobody needs into knowledge" },
     { id: "junk-barrel", label: "Trash Barrels", what: "throwing away byproducts nobody needs" },
     { id: "dispatch-portal", label: "Dispatch Portals", what: "selling byproducts nobody needs" },
+    { id: "purchasing-portal", label: "Purchasing Portals", what: "buying raw materials inside the module" },
 ] as const;
 
 /** What the generator may use */
@@ -67,6 +68,7 @@ export interface Capabilities {
     trash: boolean;
     sell: boolean;
     altar: boolean;
+    buy: boolean;
 }
 
 export function capabilities(unlocks?: BuildUnlocks): Capabilities {
@@ -83,6 +85,7 @@ export function capabilities(unlocks?: BuildUnlocks): Capabilities {
         trash: can("junk-barrel"),
         sell: can("dispatch-portal"),
         altar: can("knowledge-altar"),
+        buy: can("purchasing-portal"),
     };
 }
 

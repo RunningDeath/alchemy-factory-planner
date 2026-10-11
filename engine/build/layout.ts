@@ -32,6 +32,8 @@ export interface Placement {
     pipeEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
     /** Filters: the item sent to the first (lower) output; everything else takes the second */
     filterItem?: string;
+    /** Purchasing portals: the item bought */
+    supplyItem?: string;
 }
 
 export interface WorldCell extends FootprintCell {

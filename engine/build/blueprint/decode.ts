@@ -77,7 +77,11 @@ export function blueprintToPlacements(body: Property[]): DecodedLayout {
     for (const raw of buildingsOf(body)) {
         const b = decodeBuilding(raw);
         const filter = getProp<string>(raw, "FilterName");
-        const extra = filter && filter !== "None" ? { filterItem: filter.toLowerCase() } : undefined;
+        const supply = getProp<string>(raw, "SupplyName");
+        const extra = {
+            ...(filter && filter !== "None" && { filterItem: filter.toLowerCase() }),
+            ...(supply && supply !== "None" && { supplyItem: supply.toLowerCase() }),
+        };
         if (b.extension.length) {
             // Conveyor lift: one blueprint building, one piece per storey
             b.extension.forEach((e, i) => add(e.row, e.rot, [b.pivot[0], b.pivot[1], b.pivot[2] + i]));
