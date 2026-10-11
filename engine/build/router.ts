@@ -73,6 +73,8 @@ export interface RouterOptions {
     sideExit?: (itemName: string) => boolean;
     /** Conveyor lifts may change levels (default: yes) */
     lifts?: boolean;
+    /** Items that come in through one belt for the whole module (another import only when that belt is full) */
+    singleImport?: (itemName: string) => boolean;
     /** Priority splitters put consumers before the export (default: yes) */
     prioritySplitters?: boolean;
     /** Share of the routing done (0–1), reported as connections are routed */
@@ -266,6 +268,8 @@ interface Start {
 
 /** Starting a second import of an item that could branch off the first costs this much more */
 const EXTRA_IMPORT_COST = 40;
+/** The same for a single-import item: practically never while the first belt has room */
+const SINGLE_IMPORT_COST = 100_000;
 
 type Goal =
     | { kind: "entry"; end: LaneEnd }
@@ -670,7 +674,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                 joinable = true;
                 for (const side of SIDES) if (canAdd(n, side, "out")) starts.push({ cell: add(n.cell, side), inSide: oppositeSide(side), branchFrom: n });
             }
-            const extra = joinable ? EXTRA_IMPORT_COST : 0;
+            const extra = joinable ? (options.singleImport?.(conn.itemName) ? SINGLE_IMPORT_COST : EXTRA_IMPORT_COST) : 0;
             for (let x = minX; x <= maxX; x++) {
                 // Raw materials come in at the front only; products leave at the back
                 starts.push({ cell: [x, minY, 0], inSide: "up", edge: true, extra });

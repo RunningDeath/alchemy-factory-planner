@@ -125,6 +125,7 @@ export function describePlacement(p: Placement): string {
     const item = carriedItem(p);
     if (getFootprint(p.id)?.category === "production" && p.label) return `${name} making ${p.label}`;
     if (p.filterItem) return `${name}: ${p.filterItem} to the first output, the rest to the second`;
+    if (p.supplyItem) return `${name} buying ${p.supplyItem}`;
     if (item) return `${name} carrying ${item}`;
     if (p.label) return `${name} carrying ${p.label}`;
     return name;

@@ -29,10 +29,11 @@ interface Record {
     pieces?: { row: string; rot: Rotation }[];
     /** App placements this building stands for */
     uids: string[];
-    /** Internal names the game stores: sorted item, recipe, nursery seed */
+    /** Internal names the game stores: sorted item, recipe, nursery seed, item a purchasing portal buys */
     filterName?: string;
     recipeName?: string;
     seedName?: string;
+    supplyName?: string;
 }
 
 export interface BlueprintBody {
@@ -64,6 +65,7 @@ function plainRecord(p: Placement, fp: BuildingFootprint): Record {
         activeIndex: 0,
         uids: [p.uid],
         filterName: p.filterItem ? gameItemName(p.filterItem) : undefined,
+        supplyName: p.supplyItem ? gameItemName(p.supplyItem) : undefined,
         ...machineSettings(p, fp),
     };
 }
@@ -188,6 +190,7 @@ export function placementsToBody(placements: Placement[]): BlueprintBody {
         setProp(b, "FilterName", r.filterName ?? "None");
         setProp(b, "RecipeName", r.recipeName ?? "None");
         setProp(b, "SeedName", r.seedName ?? "None");
+        setProp(b, "SupplyName", r.supplyName ?? "None");
         setPath(b, ["RelativeGridGroup", "Pivot"], pivot);
         setPath(b, ["RelativeGridGroup", "GridArea"], area);
         const pkg = getProp<Property[]>(b, "building");

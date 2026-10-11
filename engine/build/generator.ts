@@ -26,6 +26,7 @@ import { buildOccupancy, placementCells, placementPorts, type Placement } from "
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
 import { attachDisposal, type Disposal } from "./disposal";
+import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -82,6 +83,8 @@ export interface ModuleOptions {
     stackBlocks?: boolean;
     /** Unneeded output (byproducts, overflow): knowledge altar, trash barrel, dispatch portal or out at the edge. Default: the first of these that is unlocked */
     disposal?: Disposal;
+    /** Buy purchasable raw materials at purchasing portals inside the module, paid through one coin belt (default: yes, when unlocked) */
+    buyRaw?: boolean;
     /** Progress while laying out and routing: share done (0–1) and what is happening */
     onProgress?: (fraction: number, label: string) => void;
 }
@@ -1036,7 +1039,9 @@ function withUnlockedHeating(step: ModuleStep, can: Capabilities): ModuleStep {
 export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
     const can = capabilities(options.unlocks);
-    const steps = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
+    const made = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
+    // Purchasable raw materials come from portals in the module (raw side first) instead of the edge
+    const steps = options.buyRaw !== false && can.buy ? [...purchaseSteps(made, options.beltSpeed), ...made] : made;
     // Upper levels are fed by lifts; decks need beams
     const allowed = (stacking: Stacking): Stacking =>
         !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
@@ -1058,8 +1063,8 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
             }
             continue;
         }
-        // Heated machines need their heat source right under them: no stacking
-        const stacking: Stacking = step.heating ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
+        // Heated machines need their heat source right under them: no stacking (portals stay on the ground too)
+        const stacking: Stacking = step.heating || step.deviceId === PURCHASING_PORTAL ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
         const baseZ = step.heating ? PLATFORM_HEIGHT[step.heating.kind] : 0;
 
         // Split into several blocks when one can't hold all machines
@@ -1074,7 +1079,8 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
             const block = buildTier(step, n, shape, fp, rot, stacking, { x: 0, y: 1, z: baseZ }, blocks.length, options.beltSpeed);
             block.info.y = 0;
             block.info.depth += 1;
-            block.placements = block.placements.map((p) => ({ ...p, block: blocks.length }));
+            // A portal sells what its block is for
+            block.placements = block.placements.map((p) => ({ ...p, block: blocks.length, ...(p.id === PURCHASING_PORTAL && { supplyItem: step.itemName }) }));
             blocks.push(block);
         }
     }
@@ -1126,7 +1132,7 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         options.stackBlocks === false || !can.lifts
             ? singles
             : buildTowers(
-                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating })),
+                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL })),
                   { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
               );
     // Stacked towers first; side by side only when the towers can't be belted together
@@ -1240,6 +1246,7 @@ function layOut(
         ...blocks.flatMap((b) => (b.info.heating ? [b.info.heating.fuelItem] : [])),
     ]);
     const products = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
+    const coins = new Set(blocks.filter((b) => b.info.deviceId === PURCHASING_PORTAL).flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
 
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
@@ -1252,6 +1259,8 @@ function layOut(
               bridges: options.useBridges && can.bridges,
               lifts: can.lifts,
               prioritySplitters: can.prioritySplitters,
+              // One money belt for all purchasing portals
+              singleImport: (item) => coins.has(item),
               // Final products and chosen surplus leave; byproducts that share a belt go to a sink
               // (through any side); other surplus stays in the line (it only slows its machines)
               exportable: (item) => finals.has(item) || products.has(item) || chosen.has(item) || leftovers.has(item),
