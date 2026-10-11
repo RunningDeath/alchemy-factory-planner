@@ -47,3 +47,6 @@ next-env.d.ts
 /tools/extract-game-data/bin/
 /tools/extract-game-data/obj/
 /dt_buildings*.json
+
+# agent worktrees
+/.claude/worktrees/
