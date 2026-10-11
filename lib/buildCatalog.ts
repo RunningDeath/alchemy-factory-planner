@@ -13,8 +13,23 @@ export function itemDisplayName(itemId: string): string {
     return itemNames.get(itemId) ?? itemId;
 }
 
+/** Parts the game names only internally */
+const NAME_OVERRIDES: Record<string, string> = {
+    "conveyer-lift-body": "Conveyor Lifter (shaft)",
+    "conveyer-lift-end-upwards": "Conveyor Lifter (top, out)",
+    "conveyer-lift-end-downwards": "Conveyor Lifter (top, in)",
+    "conveyer-lift-upwards": "Conveyor Lifter (bottom, in)",
+    "conveyer-lift-downwards": "Conveyor Lifter (bottom, out)",
+};
+
 export function buildingName(id: string): string {
-    return getFootprint(id)?.name ?? id;
+    if (NAME_OVERRIDES[id]) return NAME_OVERRIDES[id];
+    const fp = getFootprint(id);
+    if (!fp) return id;
+    // Variants share a name: say how long or high they are
+    if (id.startsWith("beam")) return `${fp.name} (${Math.max(fp.size.x, fp.size.y)} long)`;
+    if (fp.category === "structure" && fp.size.z > 1 && fp.name === "Lab Stands") return `${fp.name} (${fp.size.z} high)`;
+    return fp.name;
 }
 
 export interface PaletteGroup {
@@ -60,16 +75,45 @@ const CATEGORY_COLORS: Record<BuildingCategory, string> = {
     portal: "#b45cc8",
 };
 
-/** Distinct hues for production steps, so each step's machines stand out */
-const STEP_COLORS = ["#d4a43a", "#5dd97a", "#6db8e8", "#e8a840", "#b794ff", "#e05e8a", "#4fd1c5", "#c7d65b", "#f0845c", "#8fa8ff"];
+/** One colour per item: belts take the colour of what they carry, machines of what they make */
+const ITEM_PALETTE = [
+    "#f2c14e", "#5dd97a", "#5fb8f0", "#f07c5c", "#c084fc", "#4fd1c5", "#e86fa8", "#b8d64c",
+    "#ff9f43", "#8fa8ff", "#e0e0e0", "#a3e635", "#f472b6", "#38bdf8", "#facc15", "#fb7185",
+];
+/** Belts that carry more than one item (before a filter) */
+export const MIXED_COLOR = "#7a6f8f";
 
-export function placementColor(p: Placement, stepIndex: Map<string, number>): string {
-    if (p.lane) return beltColor(p);
-    const fp = getFootprint(p.id);
-    if (fp?.category === "production" && p.nodeKey && stepIndex.has(p.nodeKey)) {
-        return STEP_COLORS[stepIndex.get(p.nodeKey)! % STEP_COLORS.length];
-    }
-    return CATEGORY_COLORS[fp?.category ?? "logistics"];
+export function itemColorMap(items: string[]): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const item of items) if (!map.has(item)) map.set(item, ITEM_PALETTE[map.size % ITEM_PALETTE.length]);
+    return map;
+}
+
+/** The single item a belt, lift or machine carries or makes, if it's just one */
+export function carriedItem(p: Placement): string | null {
+    if (!p.label || p.label.includes(" + ") || p.label.startsWith("filter:")) return null;
+    const category = getFootprint(p.id)?.category;
+    if (category === "production" || category === "logistics" || p.lane) return p.label;
+    return null;
+}
+
+export function placementColor(p: Placement, itemColors: Map<string, string>): string {
+    const item = carriedItem(p);
+    if (item && itemColors.has(item)) return itemColors.get(item)!;
+    if (p.label && (p.label.includes(" + ") || p.label.startsWith("filter:"))) return MIXED_COLOR;
+    if (p.lane) return BELT_COLORS.manual;
+    return CATEGORY_COLORS[getFootprint(p.id)?.category ?? "logistics"];
+}
+
+/** Hover text: what the building is and what it carries or makes */
+export function describePlacement(p: Placement): string {
+    const name = buildingName(p.id);
+    const item = carriedItem(p);
+    if (getFootprint(p.id)?.category === "production" && p.label) return `${name} making ${p.label}`;
+    if (p.filterItem) return `${name}: ${p.filterItem} to the first output, the rest to the second`;
+    if (item) return `${name} carrying ${item}`;
+    if (p.label) return `${name} carrying ${p.label}`;
+    return name;
 }
 
 /** Belt arrows: blue feeds machines, orange collects output, purple connects blocks, grey is hand-drawn */

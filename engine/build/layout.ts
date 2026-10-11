@@ -28,6 +28,10 @@ export interface Placement {
     block?: number;
     /** Open end of a generated lane: where items enter (in) or leave (out) the block */
     laneEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
+    /** Fluid this building takes in or gives out through its pipe ports */
+    pipeEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
+    /** Filters: the item sent to the first (lower) output; everything else takes the second */
+    filterItem?: string;
 }
 
 export interface WorldCell extends FootprintCell {
@@ -44,7 +48,9 @@ export type LayoutIssue =
     | { kind: "unknown"; uid: string }
     | { kind: "underground"; uid: string }
     | { kind: "collision"; uid: string; other: string; cell: [number, number, number] }
-    | { kind: "unsupported"; uid: string; cell: [number, number, number] };
+    | { kind: "unsupported"; uid: string; cell: [number, number, number] }
+    /** Heated machines must be built on a heating device ("Can only be built on heating devices") */
+    | { kind: "unheated"; uid: string };
 
 export const cellKey = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
@@ -106,6 +112,15 @@ export function placementIssues(p: Placement, occupancy: Map<string, WorldCell[]
         }
     }
     if (unsupported) issues.push(unsupported);
+
+    const fp = getFootprint(p.id)!;
+    if (fp.heatCost && fp.category === "production") {
+        const bottom = Math.min(...cells.map((c) => c.z));
+        const heated = cells
+            .filter((c) => c.z === bottom && c.foundation)
+            .every((c) => (occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? []).some((b) => getFootprint(b.id)?.category === "heating"));
+        if (!heated) issues.push({ kind: "unheated", uid: p.uid });
+    }
     return issues;
 }
 

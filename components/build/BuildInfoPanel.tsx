@@ -23,6 +23,7 @@ const ISSUE_TEXT: Record<LayoutIssue["kind"], string> = {
     unsupported: "has nothing to stand on",
     underground: "is below the ground",
     unknown: "unknown building",
+    unheated: "needs a heating device under it",
 };
 
 export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, onSelect, onGoToLevel }: BuildInfoPanelProps) {

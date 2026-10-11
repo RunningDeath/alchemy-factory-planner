@@ -6,7 +6,8 @@ import { beltPath, lPath } from "../../engine/build/edit";
 import { footprintPorts, getFootprint, rotatedSize, SIDE_OFFSET } from "../../engine/build/footprint";
 import { placementCells, placementIssues, type LayoutIssue, type Placement, type PortStatus, type WorldCell } from "../../engine/build/layout";
 import { QUAD, type Side } from "../../engine/build/types";
-import { BELT_COLORS, beltColor, buildingName, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
+import { placementsAt } from "../../engine/build/edit";
+import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
 
 export interface BuildTool {
     id: string;
@@ -21,7 +22,9 @@ interface LayerGridProps {
     level: number;
     issuesByUid: Map<string, LayoutIssue[]>;
     ports: PortStatus[];
-    stepIndex: Map<string, number>;
+    itemColors: Map<string, string>;
+    /** Only this item's belts and machines at full strength */
+    highlightItem: string | null;
     selectedUid: string | null;
     tool: BuildTool | null;
     cellSize: number;
@@ -56,7 +59,8 @@ export function LayerGrid({
     level,
     issuesByUid,
     ports,
-    stepIndex,
+    itemColors,
+    highlightItem,
     selectedUid,
     tool,
     cellSize: cs,
@@ -156,7 +160,29 @@ export function LayerGrid({
     const width = extent.width * cs;
     const height = extent.height * cs;
 
+    /** Fade everything that isn't the highlighted item's belt or machine */
+    function dim(p: Placement): number {
+        if (!highlightItem) return 1;
+        return carriedItem(p) === highlightItem ? 1 : 0.18;
+    }
+
+    const hovered = hover && !tool ? placementsAt(placements, hover[0], hover[1], level) : [];
+
     return (
+        <div className="relative inline-block">
+        {hovered.length > 0 && hover && (
+            <div
+                className="absolute z-10 pointer-events-none px-2 py-1 rounded bg-[var(--surface-elevated)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] whitespace-nowrap shadow-lg"
+                style={{ left: (hover[0] - extent.minX + 1) * cs + 6, top: (hover[1] - extent.minY + 1) * cs + 6 }}
+            >
+                {hovered.map((p) => (
+                    <div key={p.uid} className="flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: placementColor(p, itemColors) }} />
+                        {describePlacement(p)}
+                    </div>
+                ))}
+            </div>
+        )}
         <svg
             width={width}
             height={height}
@@ -205,15 +231,15 @@ export function LayerGrid({
                 if (!p) return null;
                 // Belts: dark track (the arrow on top shows direction and lane)
                 if (isBeltPiece(p.id)) {
-                    return <rect key={i} x={px(c.x) + 1} y={py(c.y) + 1} width={cs - 2} height={cs - 2} rx={3} fill={BELT_COLORS.track} />;
+                    return <rect key={i} x={px(c.x) + 1} y={py(c.y) + 1} width={cs - 2} height={cs - 2} rx={3} fill={BELT_COLORS.track} opacity={dim(p)} />;
                 }
                 // Supports: hatched, so belts and machines stay readable
                 if (isSupport(p)) {
                     if (!showSupports) return null;
                     return <rect key={i} x={px(c.x) + 2} y={py(c.y) + 2} width={cs - 4} height={cs - 4} fill="url(#support-hatch)" opacity={0.55} />;
                 }
-                const color = placementColor(p, stepIndex);
-                const opacity = cellOpacity(c.layers) * (getFootprint(p.id)?.category === "floor" ? 0.45 : 1);
+                const color = placementColor(p, itemColors);
+                const opacity = cellOpacity(c.layers) * (getFootprint(p.id)?.category === "floor" ? 0.45 : 1) * dim(p);
                 if (c.quads === QUAD.ALL) {
                     return <rect key={i} x={px(c.x)} y={py(c.y)} width={cs} height={cs} fill={color} opacity={opacity} />;
                 }
@@ -245,7 +271,7 @@ export function LayerGrid({
                             rx={isMachine(p) ? 3 : 0}
                             strokeDasharray={issues.length && !selected ? "4 2" : undefined}
                         />}
-                        {isBeltPiece(p.id) && <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} />}
+                        {isBeltPiece(p.id) && <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} color={placementColor(p, itemColors)} opacity={dim(p)} />}
                         {showLabel && (
                             <text
                                 x={px(p.x) + (size.x * cs) / 2}
@@ -285,7 +311,7 @@ export function LayerGrid({
                                 ))}
                             <rect x={px(p.x)} y={py(p.y)} width={size.x * cs} height={size.y * cs} fill="none" stroke={preview.valid ? "var(--success)" : "var(--error)"} strokeWidth={2} />
                             {isBeltPiece(p.id) ? (
-                                <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} />
+                                <BeltArrows p={p} x={px(p.x)} y={py(p.y)} cs={cs} color={BELT_COLORS.manual} opacity={1} />
                             ) : (
                                 footprintPorts(fp, p.rot)
                                     .filter((port) => port.z === 0 && port.medium === "belt" && port.face !== "top" && port.face !== "base")
@@ -297,6 +323,7 @@ export function LayerGrid({
                     );
                 })}
         </svg>
+        </div>
     );
 }
 
@@ -314,15 +341,14 @@ const SIDE_POINT: Record<Side, [number, number]> = {
 };
 
 /** Lines from each input edge through the center to each output edge */
-function BeltArrows({ p, x, y, cs }: { p: Placement; x: number; y: number; cs: number }) {
-    const color = beltColor(p);
+function BeltArrows({ p, x, y, cs, color, opacity }: { p: Placement; x: number; y: number; cs: number; color: string; opacity: number }) {
     const fp = getFootprint(p.id);
     if (!fp) return null;
     const ports = footprintPorts(fp, p.rot).filter((port) => port.face !== "top" && port.face !== "base");
     const cx = x + cs / 2;
     const cy = y + cs / 2;
     return (
-        <g stroke={color} strokeWidth={Math.max(1.5, cs / 9)} strokeLinecap="round" strokeLinejoin="round" fill="none">
+        <g stroke={color} strokeWidth={Math.max(1.5, cs / 9)} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={opacity}>
             {ports.map((port, i) => {
                 const [sx, sy] = SIDE_POINT[port.face as Side];
                 // Port positions are local to the building

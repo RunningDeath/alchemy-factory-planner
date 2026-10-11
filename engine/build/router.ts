@@ -72,8 +72,8 @@ const LIFT = {
 
 const BELT_LAYERS = 3; // bottom + middle
 const MAX_EXPANSIONS = 200_000;
-/** A lift is worth a long detour: they are big, and many lifts make a layout hard to read */
-const LIFT_COST = 14;
+/** A lift costs as much as 8 belt cells: fewer lifts, but no long detours around blocks either */
+const LIFT_COST = 8;
 
 /** Rotation that turns a piece's port on \`base\` to face \`want\` */
 function rotFor(base: Side, want: Side): Rotation {

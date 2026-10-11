@@ -7,23 +7,26 @@ import { isBeltPiece } from "../../engine/build/belt-pieces";
 import type { TierInfo } from "../../engine/build/generator";
 import type { IoPoint } from "../../engine/build/router";
 import { formatRate } from "../../lib/beltDisplay";
-import { getFootprint, rotatedSize } from "../../engine/build/footprint";
+import { getFootprint, rotatedSize, SIDE_OFFSET } from "../../engine/build/footprint";
 import { placementCells, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
-import { LAYER, QUAD } from "../../engine/build/types";
-import { BELT_COLORS, beltColor, buildingName, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
+import { LAYER, QUAD, type Side } from "../../engine/build/types";
+import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
 
 interface View3DProps {
     placements: Placement[];
     tiers: TierInfo[];
     io: IoPoint[];
     ports: PortStatus[];
-    stepIndex: Map<string, number>;
+    itemColors: Map<string, string>;
+    highlightItem: string | null;
     issuesByUid: Map<string, LayoutIssue[]>;
     selectedUid: string | null;
     /** Hide everything above this level (null = show all) */
     cutLevel: number | null;
     showSupports: boolean;
     showLabels: boolean;
+    /** Arrows on machine ports and on belts */
+    showPorts: boolean;
 }
 
 /** Vertical extent of the occupied layers inside one cell (0 = bottom, 1 = top) */
@@ -51,12 +54,38 @@ interface Box {
     uid: string;
 }
 
+/** Corner posts (and a top plate) for frame-like supports: lab stands, iron stands, stand legs */
+function frameBoxes(x: number, y: number, z: number, quads: number, withTop: boolean, color: THREE.Color, uid: string): Box[] {
+    const boxes: Box[] = [];
+    const post = 0.12;
+    for (const [bit, ox, oy] of QUAD_OFFSETS) {
+        if (!(quads & bit)) continue;
+        boxes.push({ x: x + (ox === 0 ? 0.02 : 0.98 - post), y: y + (oy === 0 ? 0.02 : 0.98 - post), z, w: post, d: post, h: 1, color, uid });
+    }
+    if (withTop) {
+        // Plate over the quadrants the stand covers
+        const full = quads === QUAD.ALL;
+        for (const [bit, ox, oy] of full ? ([[QUAD.ALL, 0, 0]] as [number, number, number][]) : QUAD_OFFSETS) {
+            if (!(quads & bit)) continue;
+            const size = full ? 1 : 0.5;
+            boxes.push({ x: x + ox, y: y + oy, z: z + 0.86, w: size, d: size, h: 0.14, color, uid });
+        }
+    }
+    return boxes;
+}
+
 function boxesFor(p: Placement, color: THREE.Color, cutLevel: number | null): Box[] {
     const boxes: Box[] = [];
     const belt = isBeltPiece(p.id);
     const isFloor = getFootprint(p.id)?.category === "floor";
+    const support = isSupport(p);
     for (const c of placementCells(p)) {
         if (cutLevel !== null && c.z > cutLevel) continue;
+        // Lab stands and stand legs: posts and a plate, so it's clear what carries the belt above
+        if (support && c.layers & LAYER.SIDE && !(c.layers & LAYER.BOTTOM)) {
+            boxes.push(...frameBoxes(c.x, c.y, c.z, c.quads, (c.layers & LAYER.TOP) !== 0, color, p.uid));
+            continue;
+        }
         // Belts are thin tracks so machines stand out
         const [z0, z1] = belt ? [0, 0.18] : isFloor ? [0.85, 1] : layerSpan(c.layers);
         const sideOnly = (c.layers & ~LAYER.SIDE) === 0;
@@ -187,14 +216,87 @@ function blockLabels(tiers: TierInfo[], io: IoPoint[], placements: Placement[], 
     return sprites;
 }
 
+interface Arrow {
+    /** Center in game coordinates */
+    x: number;
+    y: number;
+    z: number;
+    dir: Side | "top" | "base";
+    size: number;
+    color: THREE.Color;
+}
+
+const PORT_IN = new THREE.Color("#5dd97a");
+const PORT_OUT = new THREE.Color("#f0a040");
+const PORT_OPEN = new THREE.Color("#e05555");
+const BELT_ARROW = new THREE.Color("#f4eee6");
+
+/**
+ * Where items go: on every machine port a cone at the port edge (green pointing in =
+ * input, orange pointing out = output, red = nothing connected), and on every belt or
+ * lift end a small light cone in the direction items move.
+ */
+function portArrows(placements: Placement[], ports: PortStatus[], cutLevel: number | null): Arrow[] {
+    const arrows: Arrow[] = [];
+    const byUid = new Map(placements.map((p) => [p.uid, p]));
+    for (const status of ports) {
+        const port = status.port;
+        if (port.medium !== "belt" || (cutLevel !== null && port.z > cutLevel)) continue;
+        const p = byUid.get(port.uid);
+        if (!p) continue;
+        const face = port.face;
+        const [dx, dy] = face === "top" || face === "base" ? [0, 0] : SIDE_OFFSET[face];
+        if (isMachine(p)) {
+            const color = !status.connectedTo ? PORT_OPEN : port.dir === "in" ? PORT_IN : PORT_OUT;
+            const pointing: Side | "top" | "base" = port.dir === "in" && face !== "top" && face !== "base" ? oppositeOf(face) : face;
+            arrows.push({ x: port.x + 0.5 + dx * 0.62, y: port.y + 0.5 + dy * 0.62, z: port.z + 0.5, dir: pointing, size: 0.32, color });
+        } else if (port.dir === "out" && (isBeltPiece(p.id) || p.id.startsWith("conveyer-lift"))) {
+            arrows.push({ x: port.x + 0.5 + dx * 0.25, y: port.y + 0.5 + dy * 0.25, z: port.z + 0.3, dir: face, size: 0.2, color: BELT_ARROW });
+        }
+    }
+    return arrows;
+}
+
+function oppositeOf(side: Side): Side {
+    return ({ left: "right", right: "left", up: "down", down: "up" } as const)[side];
+}
+
+/** Cones for the arrows; game axes → three.js: x → x, y → z, z → y */
+function arrowMesh(arrows: Arrow[]): THREE.InstancedMesh {
+    const geometry = new THREE.ConeGeometry(0.5, 1, 4);
+    const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), Math.max(1, arrows.length));
+    mesh.count = arrows.length;
+    const turn: Record<Side | "top" | "base", THREE.Euler> = {
+        right: new THREE.Euler(0, 0, -Math.PI / 2),
+        left: new THREE.Euler(0, 0, Math.PI / 2),
+        down: new THREE.Euler(Math.PI / 2, 0, 0),
+        up: new THREE.Euler(-Math.PI / 2, 0, 0),
+        top: new THREE.Euler(0, 0, 0),
+        base: new THREE.Euler(Math.PI, 0, 0),
+    };
+    const matrix = new THREE.Matrix4();
+    arrows.forEach((a, i) => {
+        matrix.compose(
+            new THREE.Vector3(a.x, a.z, a.y),
+            new THREE.Quaternion().setFromEuler(turn[a.dir]),
+            new THREE.Vector3(a.size, a.size * 1.4, a.size),
+        );
+        mesh.setMatrixAt(i, matrix);
+        mesh.setColorAt(i, a.color);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    return mesh;
+}
+
 interface SceneState {
     scene: THREE.Scene;
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
     controls: OrbitControls;
     objects: THREE.Object3D[];
-    pickable: THREE.InstancedMesh | null;
-    owners: string[];
+    /** Meshes that answer hover, with the placement behind each instance */
+    pickables: { mesh: THREE.InstancedMesh; owners: string[] }[];
     framed: boolean;
 }
 
@@ -208,7 +310,7 @@ function disposeObject(o: THREE.Object3D) {
     }
 }
 
-export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels }: View3DProps) {
+export function View3D({ placements, tiers, io, ports, itemColors, highlightItem, issuesByUid, selectedUid, cutLevel, showSupports, showLabels, showPorts }: View3DProps) {
     const mountRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneState | null>(null);
     const byUid = useRef(new Map<string, Placement>());
@@ -261,16 +363,17 @@ export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, s
         const pointer = new THREE.Vector2();
         const onMove = (e: PointerEvent) => {
             const s = sceneRef.current;
-            if (!s?.pickable) return;
+            if (!s || s.pickables.length === 0) return;
             const rect = renderer.domElement.getBoundingClientRect();
             pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
             raycaster.setFromCamera(pointer, camera);
-            const hit = raycaster.intersectObject(s.pickable)[0];
-            const p = hit?.instanceId !== undefined ? byUid.current.get(s.owners[hit.instanceId]) : undefined;
+            const hit = raycaster.intersectObjects(s.pickables.map((pk) => pk.mesh))[0];
+            const owners = s.pickables.find((pk) => pk.mesh === hit?.object)?.owners;
+            const p = hit?.instanceId !== undefined && owners ? byUid.current.get(owners[hit.instanceId]) : undefined;
             setHover(
                 p
                     ? {
-                          text: `${buildingName(p.id)}${p.label ? ` · ${p.lane === "in" ? "carries in " : p.lane === "out" ? "carries out " : ""}${p.label}` : ""} · level ${p.z}`,
+                          text: `${describePlacement(p)} · level ${p.z}`,
                           x: e.clientX - rect.left,
                           y: e.clientY - rect.top,
                       }
@@ -281,7 +384,7 @@ export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, s
         renderer.domElement.addEventListener("pointermove", onMove);
         renderer.domElement.addEventListener("pointerleave", onLeave);
 
-        sceneRef.current = { scene, camera, renderer, controls, objects: [], pickable: null, owners: [], framed: false };
+        sceneRef.current = { scene, camera, renderer, controls, objects: [], pickables: [], framed: false };
         return () => {
             cancelAnimationFrame(frame);
             observer.disconnect();
@@ -311,19 +414,24 @@ export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, s
         for (const p of placements) {
             const support = isSupport(p);
             if (support && !showSupports && p.uid !== selectedUid) continue;
-            const base = new THREE.Color(isBeltPiece(p.id) ? beltColor(p) : placementColor(p, stepIndex));
+            let base = new THREE.Color(placementColor(p, itemColors));
+            // Highlighting an item fades everything else into the background
+            if (highlightItem && carriedItem(p) !== highlightItem) base = base.clone().lerp(new THREE.Color("#120d1c"), 0.82);
             const color = p.uid === selectedUid ? selectedColor : issuesByUid.get(p.uid)?.length ? base.clone().lerp(error, 0.6) : base;
             (support ? supports : solid).push(...boxesFor(p, color, cutLevel));
         }
 
         const solidMesh = instancedMesh(solid, new THREE.MeshLambertMaterial());
-        const supportMesh = instancedMesh(supports, new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.22, depthWrite: false }));
+        const supportMesh = instancedMesh(supports, new THREE.MeshLambertMaterial());
         const outlines = machineOutlines(placements, cutLevel);
         const labels = showLabels ? blockLabels(tiers, io, placements, ports) : [];
-        s.objects = [solidMesh, supportMesh, outlines, ...labels];
+        const arrows = showPorts ? [arrowMesh(portArrows(placements, ports, cutLevel))] : [];
+        s.objects = [solidMesh, supportMesh, outlines, ...arrows, ...labels];
         s.objects.forEach((o) => s.scene.add(o));
-        s.pickable = solidMesh;
-        s.owners = solid.map((b) => b.uid);
+        s.pickables = [
+            { mesh: solidMesh, owners: solid.map((b) => b.uid) },
+            { mesh: supportMesh, owners: supports.map((b) => b.uid) },
+        ];
 
         // Frame the camera on the first non-empty layout
         if (!s.framed && solid.length > 0) {
@@ -336,7 +444,7 @@ export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, s
             s.camera.position.set(center.x + radius * 0.9, center.y + radius * 1.0, center.z + radius * 1.1);
             s.framed = true;
         }
-    }, [placements, tiers, io, ports, stepIndex, issuesByUid, selectedUid, cutLevel, showSupports, showLabels]);
+    }, [placements, tiers, io, ports, itemColors, highlightItem, issuesByUid, selectedUid, cutLevel, showSupports, showLabels, showPorts]);
 
     return (
         <div className="relative w-full h-full min-h-[320px]">
@@ -350,16 +458,11 @@ export function View3D({ placements, tiers, io, ports, stepIndex, issuesByUid, s
                 </div>
             )}
             <div className="absolute bottom-2 left-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--text-muted)] pointer-events-none">
+                <span>belts and machines are coloured by item (see the legend above) · brown: lab stands, beams and wood blocks carrying raised belts</span>
                 <span>
-                    <span style={{ color: BELT_COLORS.in }}>■</span> belt into machines
+                    ports: <span style={{ color: "#5dd97a" }}>▲ input</span> <span style={{ color: "#f0a040" }}>▲ output</span>{" "}
+                    <span style={{ color: "#e05555" }}>▲ not connected</span> · light cones: belt direction
                 </span>
-                <span>
-                    <span style={{ color: BELT_COLORS.out }}>■</span> belt out of machines
-                </span>
-                <span>
-                    <span style={{ color: BELT_COLORS.route }}>■</span> belt/lift between blocks
-                </span>
-                <span>hatched/faded: supports</span>
                 <span>drag orbit · right-drag pan · scroll zoom · hover for names</span>
             </div>
         </div>

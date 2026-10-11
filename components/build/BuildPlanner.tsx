@@ -6,7 +6,8 @@ import { DEFAULT_MODULE_OPTIONS, generateModule } from "../../engine/build/gener
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
 import type { BuildLayoutState } from "../../engine/types";
-import { BELT_COLORS, buildingName } from "../../lib/buildCatalog";
+import { BELT_COLORS, buildingName, carriedItem, itemColorMap } from "../../lib/buildCatalog";
+import { ItemLegend } from "./ItemLegend";
 import { useFactoryStore } from "../../store/useFactoryStore";
 import { BuildInfoPanel } from "./BuildInfoPanel";
 import { BuildPalette } from "./BuildPalette";
@@ -57,6 +58,7 @@ export function BuildPlanner() {
     const [cutAbove, setCutAbove] = useState(false);
     const [showSupports, setShowSupports] = useState(true);
     const [showLabels, setShowLabels] = useState(true);
+    const [showPorts, setShowPorts] = useState(true);
     const [hoverCell, setHoverCell] = useState<[number, number] | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
@@ -67,6 +69,7 @@ export function BuildPlanner() {
 
     const steps = useMemo(() => (report ? stepsFromReport(report) : []), [report]);
     const stepIndex = useMemo(() => new Map(steps.map((s, i) => [s.nodeKey, i])), [steps]);
+    const [highlightItem, setHighlightItem] = useState<string | null>(null);
 
     const occupancy = useMemo(() => buildOccupancy(placements), [placements]);
     const issues = useMemo(() => placements.flatMap((p) => placementIssues(p, occupancy)), [placements, occupancy]);
@@ -76,6 +79,16 @@ export function BuildPlanner() {
         return map;
     }, [issues]);
     const ports = useMemo(() => portConnections(placements), [placements]);
+    // One colour per item, in production order: what each step makes, then what comes in from outside
+    const itemColors = useMemo(() => {
+        const order = [
+            ...steps.map((st) => st.itemName),
+            ...steps.flatMap((st) => [...st.outputs, ...st.inputs].map((fl) => fl.itemName)),
+            ...(layout?.io ?? []).map((p) => p.itemName),
+            ...placements.map(carriedItem).filter((i): i is string => !!i),
+        ];
+        return itemColorMap(order.filter((item) => placements.some((p) => carriedItem(p) === item)));
+    }, [steps, layout?.io, placements]);
     const placedByNode = useMemo(() => {
         const map = new Map<string, number>();
         placements.forEach((p) => p.nodeKey && stepIndex.has(p.nodeKey) && p.id === steps[stepIndex.get(p.nodeKey)!].deviceId && map.set(p.nodeKey, (map.get(p.nodeKey) ?? 0) + 1));
@@ -229,6 +242,8 @@ export function BuildPlanner() {
                 onShowSupportsChange={setShowSupports}
                 showLabels={showLabels}
                 onShowLabelsChange={setShowLabels}
+                showPorts={showPorts}
+                onShowPortsChange={setShowPorts}
                 onUndo={undo}
                 onRedo={redo}
             />
@@ -256,6 +271,7 @@ export function BuildPlanner() {
                         {message && <span className="text-[var(--warning)] font-semibold">{message}</span>}
                         {hoverCell && <HoverInfo placements={placementsAt(placements, hoverCell[0], hoverCell[1], level)} />}
                     </div>
+                    <ItemLegend itemColors={itemColors} highlightItem={highlightItem} onHighlight={setHighlightItem} />
                     <div className={view === "split" ? "flex-1 min-h-0 grid grid-rows-2 xl:grid-rows-1 xl:grid-cols-2" : "flex-1 min-h-0 flex"}>
                         {view !== "3d" && (
                             <div className="overflow-auto custom-scrollbar min-h-0 flex-1">
@@ -265,7 +281,8 @@ export function BuildPlanner() {
                                     level={level}
                                     issuesByUid={issuesByUid}
                                     ports={ports}
-                                    stepIndex={stepIndex}
+                                    itemColors={itemColors}
+                                    highlightItem={highlightItem}
                                     selectedUid={selectedUid}
                                     tool={tool}
                                     cellSize={cellSize}
@@ -287,7 +304,9 @@ export function BuildPlanner() {
                                     ports={ports}
                                     showSupports={showSupports}
                                     showLabels={showLabels}
-                                    stepIndex={stepIndex}
+                                    showPorts={showPorts}
+                                    itemColors={itemColors}
+                                    highlightItem={highlightItem}
                                     issuesByUid={issuesByUid}
                                     selectedUid={selectedUid}
                                     cutLevel={cutAbove ? level : null}

@@ -30,6 +30,8 @@ interface BuildToolbarProps {
     onShowSupportsChange: (show: boolean) => void;
     showLabels: boolean;
     onShowLabelsChange: (show: boolean) => void;
+    showPorts: boolean;
+    onShowPortsChange: (show: boolean) => void;
     onUndo: () => void;
     onRedo: () => void;
 }
@@ -113,6 +115,10 @@ export function BuildToolbar(props: BuildToolbarProps) {
             <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Names of blocks and the items going in and out, in 3D">
                 <input type="checkbox" checked={props.showLabels} onChange={(e) => props.onShowLabelsChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
                 Labels
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Arrows on machine inputs/outputs and on belts, in 3D">
+                <input type="checkbox" checked={props.showPorts} onChange={(e) => props.onShowPortsChange(e.target.checked)} className="accent-[var(--accent-gold)]" />
+                Ports
             </label>
             <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Hide everything above the current level in 3D">
                 <input type="checkbox" checked={props.cutAbove} onChange={(e) => props.onCutAboveChange(e.target.checked)} className="accent-[var(--accent-gold)]" />

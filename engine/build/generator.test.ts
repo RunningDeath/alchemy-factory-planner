@@ -159,3 +159,95 @@ describe("stepsFromReport → generateModule", () => {
     expect(grinders).toBe(steps.filter((s) => s.deviceId === "grinder").reduce((sum, s) => sum + s.machines, 0));
   });
 });
+
+describe("separate inputs, filters and heating", () => {
+  test("a two-input assembler gets one lane per item; no lane carries both", () => {
+    const mod = generateModule(
+      [
+        step({
+          machines: 4,
+          inputs: [
+            { itemName: "Flax Fiber", perMachineRate: 30 },
+            { itemName: "Sage Powder", perMachineRate: 30 },
+          ],
+          outputs: [{ itemName: "Healing Potion", perMachineRate: 10 }],
+        }),
+      ],
+      options,
+    );
+    expect(validateLayout(mod.placements)).toEqual([]);
+    expect(unconnectedMachinePorts(mod)).toEqual([]);
+    const lanes = mod.tiers[0].lanes.filter((l) => l.kind === "in");
+    expect(lanes.every((l) => l.items.length === 1)).toBe(true);
+    expect(new Set(lanes.map((l) => l.items[0].itemName))).toEqual(new Set(["Flax Fiber", "Sage Powder"]));
+    expect(mod.tiers[0].mixedInputs).toBe(false);
+    // Every belt carries one item (routed belts included)
+    expect(mod.placements.filter((p) => p.id.startsWith("belt")).every((p) => !p.label?.includes("+"))).toBe(true);
+  });
+
+  test("an output lane with a byproduct ends in a filter and two single-item belts", () => {
+    const mod = generateModule(
+      [
+        step({
+          deviceId: "grinder",
+          machines: 2,
+          inputs: [{ itemName: "Ore", perMachineRate: 20 }],
+          outputs: [
+            { itemName: "Dust", perMachineRate: 15 },
+            { itemName: "Grit", perMachineRate: 5 },
+          ],
+        }),
+      ],
+      options,
+    );
+    expect(validateLayout(mod.placements)).toEqual([]);
+    const filters = mod.placements.filter((p) => p.id === "filter-vert");
+    expect(filters.length).toBeGreaterThan(0);
+    expect(filters.every((f) => f.filterItem === "Dust")).toBe(true);
+    expect(mod.routes.every((r) => r.ok)).toBe(true);
+    expect(mod.io.filter((p) => p.kind === "export").map((p) => p.itemName).sort()).toEqual(["Dust", "Grit"]);
+  });
+
+  test("stove heating: crucibles stand on stone stoves, fed by a fuel belt", () => {
+    const mod = generateModule(
+      [
+        step({
+          deviceId: "crucible",
+          machines: 4,
+          inputs: [{ itemName: "Stone", perMachineRate: 18 }],
+          outputs: [{ itemName: "Quicklime", perMachineRate: 18 }],
+          heating: { kind: "stove", fuelItem: "Coal", fuelRate: 4 },
+        }),
+      ],
+      options,
+    );
+    expect(validateLayout(mod.placements)).toEqual([]);
+    expect(mod.placements.some((p) => p.id === "stone-stove")).toBe(true);
+    expect(mod.tiers[0].heating?.slotsUsed).toBeLessThanOrEqual(mod.tiers[0].heating!.slotsAvailable);
+    expect(mod.io.some((p) => p.kind === "import" && p.itemName === "Coal")).toBe(true);
+    expect(mod.routes.every((r) => r.ok)).toBe(true);
+  });
+
+  test("steam heating: crucibles stand on steam heaters placed back to back", () => {
+    const mod = generateModule(
+      [
+        step({
+          deviceId: "crucible",
+          machines: 4,
+          inputs: [{ itemName: "Stone", perMachineRate: 18 }],
+          outputs: [{ itemName: "Quicklime", perMachineRate: 18 }],
+          heating: { kind: "steam", fuelItem: "Steam", fuelRate: 60 },
+        }),
+      ],
+      options,
+    );
+    expect(validateLayout(mod.placements)).toEqual([]);
+    expect(mod.placements.some((p) => p.id === "steam-heater")).toBe(true);
+    expect(mod.placements.some((p) => p.id === "stone-stove")).toBe(false);
+  });
+
+  test("a heated machine without a heating device under it is flagged", () => {
+    const issues = validateLayout([{ uid: "c", id: "crucible", x: 0, y: 0, z: 0, rot: 0 }]);
+    expect(issues.map((i) => i.kind)).toContain("unheated");
+  });
+});
