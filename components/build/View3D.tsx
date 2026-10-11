@@ -352,14 +352,20 @@ function portArrows(placements: Placement[], ports: PortStatus[], cutLevel: numb
         if (!p) continue;
         const face = port.face;
         const [dx, dy] = face === "top" || face === "base" ? [0, 0] : SIDE_OFFSET[face];
-        // Machines and lifts: where items go in and come out (a lift's ends are far apart)
-        if (isMachine(p) || p.id.startsWith("conveyer-lift")) {
+        // Machines, lifts, splitters, filters and mergers: where items go in and come out
+        if (isMachine(p) || (!isBeltPiece(p.id) && getFootprint(p.id)?.category === "logistics")) {
             const color = !status.connectedTo ? PORT_OPEN : port.dir === "in" ? PORT_IN : PORT_OUT;
             const pointing: Side | "top" | "base" = port.dir === "in" && face !== "top" && face !== "base" ? oppositeOf(face) : face;
             arrows.push({ x: port.x + 0.5 + dx * 0.62, y: port.y + 0.5 + dy * 0.62, z: port.z + 0.5, dir: pointing, size: 0.32, color });
         } else if (port.dir === "out" && isBeltPiece(p.id)) {
             arrows.push({ x: port.x + 0.5 + dx * 0.25, y: port.y + 0.5 + dy * 0.25, z: port.z + 0.3, dir: face, size: 0.2, color: BELT_ARROW });
         }
+    }
+    // Lifts: an arrow on the top piece shows which way they carry, seen from any angle
+    for (const p of placements) {
+        if (p.id !== "conveyer-lift-end-upwards" && p.id !== "conveyer-lift-end-downwards") continue;
+        if (cutLevel !== null && p.z > cutLevel) continue;
+        arrows.push({ x: p.x + 0.5, y: p.y + 0.5, z: p.z + 1.25, dir: p.id.endsWith("upwards") ? "top" : "base", size: 0.4, color: BELT_ARROW });
     }
     return arrows;
 }

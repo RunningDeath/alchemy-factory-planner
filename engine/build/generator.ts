@@ -1234,7 +1234,11 @@ function layOut(
     const finals = new Set(options.finalProducts ?? []);
     const chosen = new Set(options.exportItems ?? []);
     // What the module makes and nothing in it uses: always leaves, final products or not
-    const consumed = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
+    const consumed = new Set([
+        ...blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))),
+        // Fuel burnt under heated machines counts as used too
+        ...blocks.flatMap((b) => (b.info.heating ? [b.info.heating.fuelItem] : [])),
+    ]);
     const products = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
 
     // Belt the blocks to each other, to the imports and to the exports
