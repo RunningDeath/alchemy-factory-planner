@@ -1,6 +1,7 @@
 // Dumps DT_Buildings (footprints, ports, costs) from an Alchemy Factory install as JSON,
-// with English display names. scripts/build-footprints.ts turns the dump into
-// data/building-footprints.json.
+// with English display names, plus the tables that unlock buildings (research tree,
+// workbench, quests). scripts/build-footprints.ts turns the dump into
+// data/building-footprints.json, scripts/build-unlocks.ts into data/building-unlocks.json.
 //
 // Usage: dotnet run -- <paks dir> <mappings.usmap> <out.json>
 // The game uses unversioned properties, so a .usmap is required (see README.md).
@@ -35,8 +36,9 @@ var provider = new DefaultFileProvider(paksDir, SearchOption.TopDirectoryOnly, n
 provider.Initialize();
 provider.Mount();
 
-var table = provider.LoadPackageObject<UDataTable>("AlchemyFactory/Content/DataTables/DT_Buildings.DT_Buildings");
-var rows = table.RowMap.ToDictionary(kv => kv.Key.Text, kv => kv.Value);
+Dictionary<string, CUE4Parse.UE4.Assets.Objects.FStructFallback> Rows(string name) =>
+    provider.LoadPackageObject<UDataTable>($"AlchemyFactory/Content/DataTables/{name}.{name}").RowMap.ToDictionary(kv => kv.Key.Text, kv => kv.Value);
+var rows = Rows("DT_Buildings");
 
 // English strings, keyed by localization key (DisplayName.Key in the rows)
 var locres = new FTextLocalizationResource(provider.CreateReader("AlchemyFactory/Content/Localization/Game/en/Game.locres"));
@@ -45,6 +47,6 @@ foreach (var ns in locres.Entries)
     foreach (var entry in ns.Value)
         english.TryAdd(entry.Key.Str, entry.Value.LocalizedString);
 
-File.WriteAllText(outPath, JsonConvert.SerializeObject(new { buildings = rows, english }, Formatting.Indented));
+File.WriteAllText(outPath, JsonConvert.SerializeObject(new { buildings = rows, english, skillPoints = Rows("DT_SkillPoints"), workbench = Rows("DT_Workbench"), quests = Rows("DT_Quests") }, Formatting.Indented));
 Console.WriteLine($"Wrote {rows.Count} buildings to {outPath}");
 return 0;

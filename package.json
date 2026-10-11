@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "sync-data": "bun run scripts/sync-data.ts",
-    "build-footprints": "bun run scripts/build-footprints.ts"
+    "build-footprints": "bun run scripts/build-footprints.ts",
+    "build-unlocks": "bun run scripts/build-unlocks.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",

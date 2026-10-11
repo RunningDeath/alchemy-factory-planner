@@ -2,12 +2,14 @@
 
 import { ChevronDown, ChevronUp, Download, FlipHorizontal2, Redo2, RotateCw, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ModuleOptions } from "../../engine/build/generator";
+import type { BuildUnlocks } from "../../engine/build/unlocks";
 import { buildingName } from "../../lib/buildCatalog";
 import { cn } from "../../lib/utils";
 import type { BuildTool } from "./LayerGrid";
+import { UnlocksMenu } from "./UnlocksMenu";
 
 export type BuildViewMode = "2d" | "split" | "3d";
-type GeneratorOptions = Omit<ModuleOptions, "beltSpeed">;
+type GeneratorOptions = Omit<ModuleOptions, "beltSpeed" | "unlocks">;
 
 interface BuildToolbarProps {
     options: GeneratorOptions;
@@ -35,6 +37,8 @@ interface BuildToolbarProps {
     onUndo: () => void;
     onRedo: () => void;
     onExport: () => void;
+    unlocks: BuildUnlocks;
+    onUnlocksChange: (unlocks: BuildUnlocks) => void;
 }
 
 const buttonClass =
@@ -74,6 +78,7 @@ export function BuildToolbar(props: BuildToolbarProps) {
                 <input type="checkbox" checked={!!options.useBridges} onChange={(e) => onOptionsChange({ ...options, useBridges: e.target.checked })} className="accent-[var(--accent-gold)]" />
                 Bridges
             </label>
+            <UnlocksMenu unlocks={props.unlocks} onChange={props.onUnlocksChange} buttonClass={buttonClass} />
 
             <span className="w-px h-6 bg-[var(--border)] mx-1" />
 

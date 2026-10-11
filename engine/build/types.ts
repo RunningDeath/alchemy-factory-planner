@@ -88,3 +88,12 @@ export interface BuildingFootprint {
     /** Alternative build option, e.g. the mirrored version */
     alt?: string;
 }
+
+/** When a building becomes available in game (data/building-unlocks.json) */
+export interface BuildingUnlock {
+    /** Player level needed */
+    level: number;
+    via: "research" | "workbench" | "quest";
+    /** Skill, building or quest that unlocks it */
+    by: string;
+}

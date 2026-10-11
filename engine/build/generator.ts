@@ -24,6 +24,7 @@ import { beltPieceFor } from "./belt-pieces";
 import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, type Rotation } from "./footprint";
 import { buildOccupancy, placementPorts, type Placement } from "./layout";
 import { preferBlocks, supportColumn, beamsUnderRuns } from "./supports";
+import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
 import deviceMetadata from "../../data/device-metadata.json";
 import { flowRows, nearFeeders, packBlocks, transformBlock } from "./packing";
 
@@ -52,6 +53,8 @@ export interface ModuleStep {
     fluids?: { inputs: StepFlow[]; outputs: StepFlow[] };
     /** Heated machines stand on steam heaters (steam fuel) or stone stoves (any other fuel) */
     heating?: { kind: "steam" | "stove"; fuelItem: string; fuelRate: number };
+    /** Byproducts stay on the output belt with the product (no filter splitter unlocked) */
+    unsorted?: boolean;
 }
 
 export interface ModuleOptions {
@@ -69,6 +72,8 @@ export interface ModuleOptions {
     finalProducts?: string[];
     /** Surplus and byproducts that stay in the line instead of leaving at the edge */
     keepItems?: string[];
+    /** The player's level and unlocks; only those buildings are used. Absent: everything */
+    unlocks?: BuildUnlocks;
 }
 
 /** One storey: walls and pillars are 16 cells high */
@@ -142,6 +147,8 @@ export interface GeneratedModule {
     io: IoPoint[];
     /** Unused output that stays in the line */
     surplus: { itemName: string; rate: number }[];
+    /** Buildings in the layout the player hasn't unlocked (it had no way around them) */
+    locked: string[];
 }
 
 /** Free cells around each block, so belts can run between blocks; wider when routing fails */
@@ -259,7 +266,11 @@ function blockDepth(rows: number, sy: number, rowPitch: number, heating: ModuleS
 
 /** Output lanes that carry two items end in a filter (2 rows) and two exit stubs (1 row) */
 function filterRows(step: ModuleStep): number {
-    return step.outputs.length >= 2 ? 3 : 0;
+    return sortsOutputs(step) ? 3 : 0;
+}
+
+function sortsOutputs(step: ModuleStep): boolean {
+    return step.outputs.length >= 2 && !step.unsorted;
 }
 
 function maxLevelsFor(step: ModuleStep, fp: BuildingFootprint, stacking: Stacking, opts: ModuleOptions): number {
@@ -528,7 +539,7 @@ function buildTier(
 
             const laneMachines = (pick: "ins" | "outs") =>
                 new Set([...byY.values()].flatMap((h) => h[pick].map((p) => p.machine.uid))).size;
-            const sorted = collects && step.outputs.length >= 2;
+            const sorted = collects && sortsOutputs(step);
 
             for (let y = yStart; y <= yEnd; y++) {
                 const at = byY.get(y);
@@ -848,8 +859,13 @@ function laneInfo(kind: "in" | "out", x: number, level: number, z: number, flows
 }
 
 /** Lay every step out as blocks and pack them tightly on the ground */
-export function generateModule(steps: ModuleStep[], options: ModuleOptions): GeneratedModule {
+export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
+    const can = capabilities(options.unlocks);
+    const steps = can.filters ? allSteps : allSteps.map((st) => ({ ...st, unsorted: true }));
+    // Upper levels are fed by lifts; decks need beams
+    const allowed = (stacking: Stacking): Stacking =>
+        !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
 
     for (const step of steps) {
         const fp = getFootprint(step.deviceId);
@@ -857,7 +873,7 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
         if (!fp || count <= 0) continue;
         const rot = machineRotation(fp);
         // Heated machines need their heat source right under them: no stacking
-        const stacking: Stacking = step.heating ? { kind: "none", pitch: fp.size.z } : stackingFor(fp, rot);
+        const stacking: Stacking = step.heating ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
         const baseZ = step.heating ? PLATFORM_HEIGHT[step.heating.kind] : 0;
 
         // Split into several blocks when one can't hold all machines
@@ -918,11 +934,12 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
         [CORRIDORS[CORRIDORS.length - 1], "packed"],
     ];
     for (const [corridor, mode] of attempts) {
-        const result = layOut(blocks, flow, corridor, mode, options);
+        const result = layOut(blocks, flow, corridor, mode, options, can);
         if (!best || score(result) < score(best)) best = result;
         // Both layouts of a corridor width get a chance before settling
         if (mode === "flow" && best.routes.every((r) => r.ok)) break;
     }
+    best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
     return best!;
 }
 
@@ -933,6 +950,7 @@ function layOut(
     corridor: number,
     mode: LayoutMode,
     options: ModuleOptions,
+    can: Capabilities,
 ): GeneratedModule {
     const pad = corridor * 2;
     const sizes = blocks.map((b) => ({ width: b.info.width + pad, depth: b.info.depth + pad }));
@@ -965,14 +983,18 @@ function layOut(
               margin: ROUTING_MARGIN,
               maxHeight: options.maxHeight,
               blockNames: tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`),
-              bridges: options.useBridges,
+              bridges: options.useBridges && can.bridges,
+              lifts: can.lifts,
+              prioritySplitters: can.prioritySplitters,
               // Final products always leave; chosen surplus stays in the line
               keepItems: (options.keepItems ?? []).filter((item) => !(options.finalProducts ?? []).includes(item)),
           })
         : { placements: [], routes: [], io: [], surplus: [] };
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
     // beams instead of pillars under longer raised belt runs
-    routed.placements = beamsUnderRuns(preferBlocks(routed.placements), () => nextUid("bm"));
+    // (lab stands a belt passes through stay; without that unlock they show up as locked)
+    const blocked = preferBlocks(routed.placements);
+    routed.placements = can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked;
 
     const cells = routed.placements.map((p) => {
         const fp = getFootprint(p.id);
@@ -983,5 +1005,5 @@ function layOut(
     const size: [number, number, number] = cells.length
         ? [extent(3, Math.max) - extent(0, Math.min), extent(4, Math.max) - extent(1, Math.min), extent(5, Math.max)]
         : [0, 0, 0];
-    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io, surplus: routed.surplus };
+    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io, surplus: routed.surplus, locked: [] };
 }

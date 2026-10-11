@@ -15,6 +15,8 @@ interface ExportBlueprintDialogProps {
     defaultTitle: string;
     /** Main product, used for the blueprint's icon in game */
     mainItem?: string;
+    /** Buildings the player hasn't unlocked: the game refuses the blueprint with them */
+    locked: string[];
     onClose: () => void;
 }
 
@@ -67,7 +69,7 @@ async function canvasPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
  * Exports the layout as an Alchemy Factory blueprint: a PNG preview with the blueprint
  * data appended, named like the game's own blueprint files.
  */
-export function ExportBlueprintDialog({ placements, itemColors, defaultTitle, mainItem, onClose }: ExportBlueprintDialogProps) {
+export function ExportBlueprintDialog({ placements, itemColors, defaultTitle, mainItem, locked, onClose }: ExportBlueprintDialogProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [title, setTitle] = useState(defaultTitle);
     const [description, setDescription] = useState("");
@@ -124,6 +126,12 @@ export function ExportBlueprintDialog({ placements, itemColors, defaultTitle, ma
                     Description
                     <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]" />
                 </label>
+
+                {locked.length > 0 && (
+                    <p className="text-[var(--warning)]">
+                        Not unlocked at your level: {locked.join(", ")}. The game will refuse to place this blueprint until you unlock them.
+                    </p>
+                )}
 
                 <button
                     onClick={handleExport}

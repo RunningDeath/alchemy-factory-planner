@@ -23,6 +23,9 @@ cd tools/extract-game-data
 dotnet run -c Release -- "<Steam>/steamapps/common/Alchemy Factory/AlchemyFactory/Content/Paks" path/to/mappings.usmap ../../dt_buildings.json
 cd ../..
 bun run build-footprints dt_buildings.json
+bun run build-unlocks dt_buildings.json
 ```
+
+The dump also holds the research tree, workbench recipes and quests; `build-unlocks` turns them into `data/building-unlocks.json` (the level each building becomes available at).
 
 The first run downloads the Oodle decompression library that CUE4Parse needs.

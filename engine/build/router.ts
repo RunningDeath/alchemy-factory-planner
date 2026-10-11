@@ -68,6 +68,10 @@ export interface RouterOptions {
     bridges?: boolean;
     /** Unused output of these items stays in the line instead of leaving at the module edge */
     keepItems?: string[];
+    /** Conveyor lifts may change levels (default: yes) */
+    lifts?: boolean;
+    /** Priority splitters put consumers before the export (default: yes) */
+    prioritySplitters?: boolean;
 }
 
 const PRIORITY_SPLITTER = "splitter-vert";
@@ -425,7 +429,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             }
 
             // Lift up or down from the next cell
-            if (liftFree(n) && cur.step.kind === "belt") {
+            if (options.lifts !== false && liftFree(n) && cur.step.kind === "belt") {
                 for (const z2 of liftLevels) {
                     if (z2 === n[2]) continue;
                     const lo = Math.min(z2, n[2]);
@@ -613,7 +617,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     for (const exit of ends.filter((e) => e.kind === "out")) {
         const mine = connections.filter((c) => c.from === exit);
         const overflow = mine.find((c) => c.to === "export");
-        if (!overflow || mine.length < 2) continue;
+        if (!overflow || mine.length < 2 || options.prioritySplitters === false) continue;
         const splitter = prioritySplitter(exit, overflow.itemName);
         if (!splitter) continue;
         all.push(splitter.placement);

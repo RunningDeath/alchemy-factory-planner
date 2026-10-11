@@ -22,8 +22,22 @@ const NAME_OVERRIDES: Record<string, string> = {
     "conveyer-lift-downwards": "Conveyor Lifter (bottom, out)",
 };
 
+/**
+ * The app draws belts with the game's fixed pieces (each knows its sides), but they are
+ * plain conveyor belts in game and in exported blueprints: only the shape differs
+ */
+function beltShape(id: string): string | null {
+    if (id === "belt-fixed") return "";
+    if (id === "belt-fixed-cw" || id === "belt-fixed-c-c-w") return " (turn)";
+    if (id.startsWith("belt-fixed-") && id.includes("split")) return " (split)";
+    if (id.startsWith("belt-fixed-") && id.includes("merge")) return " (merge)";
+    return null;
+}
+
 export function buildingName(id: string): string {
     if (NAME_OVERRIDES[id]) return NAME_OVERRIDES[id];
+    const shape = beltShape(id);
+    if (shape !== null) return `Conveyor Belt${shape}`;
     const fp = getFootprint(id);
     if (!fp) return id;
     // Variants share a name: say how long or high they are

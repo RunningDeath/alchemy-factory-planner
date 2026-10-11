@@ -25,6 +25,7 @@ import {
 } from "../engine/types";
 import { analyzeBelts, BeltReport, DEFAULT_ROUNDING, LineMode, RoundingChoice } from "../engine/belt-analysis";
 import { generateGraph } from "../lib/graphMapper";
+import { MAX_LEVEL, type BuildUnlocks } from "../engine/build/unlocks";
 
 // Extended Factory Data to include visual state
 export interface FactoryData extends FactoryState {
@@ -113,6 +114,8 @@ interface FactoryStore {
     factories: FactoryData[];
     activeFactoryId: string | null;
     research: ResearchState;
+    /** The player's level and unlocks: the build planner only uses these buildings */
+    buildUnlocks: BuildUnlocks;
 
     // Actions
     addFactory: () => void;
@@ -124,6 +127,7 @@ interface FactoryStore {
     setResearch: (field: keyof ResearchState, value: number) => void;
     setResearchBulk: (updates: Partial<ResearchState>) => void;
     resetResearch: () => void;
+    setBuildUnlocks: (unlocks: BuildUnlocks) => void;
 
     updateFactoryConfig: (id: string, updates: Partial<PlannerConfig>) => void;
     updateFactoryTargets: (
@@ -154,6 +158,9 @@ export const useFactoryStore = create<FactoryStore>()(
             factories: [],
             activeFactoryId: null,
             research: DEFAULT_RESEARCH,
+            buildUnlocks: { level: MAX_LEVEL },
+
+            setBuildUnlocks: (buildUnlocks) => set({ buildUnlocks }),
 
             addFactory: () => {
                 const id = crypto.randomUUID();
@@ -410,6 +417,7 @@ export const useFactoryStore = create<FactoryStore>()(
                 })),
                 activeFactoryId: state.activeFactoryId,
                 research: state.research,
+                buildUnlocks: state.buildUnlocks,
             }),
             onRehydrateStorage: () => (state) => {
                 // Recalculate production trees after loading from localStorage

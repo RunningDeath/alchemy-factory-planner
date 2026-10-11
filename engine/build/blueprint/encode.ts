@@ -5,7 +5,7 @@ import { isBeltPiece } from "../belt-pieces";
 import { canSupport, getFootprint, oppositeSide, SIDE_OFFSET, type Rotation } from "../footprint";
 import { buildOccupancy, cellKey, placementCells, placementPorts, type Placement } from "../layout";
 import type { BuildingFootprint, Side } from "../types";
-import { beltActiveIndex, beltOutput, beltRotationFor } from "./belts";
+import { beltActiveIndex, beltFront, beltOutput, beltRotationFor } from "./belts";
 import { writeBlueprintFile } from "./file";
 import { baseArea, buildPos, gridArea, GRID_ROTATIONS, pivotFromPlacement } from "./grid";
 import { oodleStore } from "./oodle";
@@ -55,21 +55,17 @@ function plainRecord(p: Placement, fp: BuildingFootprint): Record {
 }
 
 /**
- * Fixed belt pieces with one output become plain belts (what player blueprints use);
- * splitters stay fixed pieces, exported under their own row names.
+ * Every belt piece, splits and merges included, becomes a plain belt: that is all player
+ * blueprints use, and the fixed pieces are a separate unlock in game.
  */
-function beltRecord(p: Placement, fp: BuildingFootprint, byCell: Map<string, Placement[]>): Record {
+function beltRecord(p: Placement, byCell: Map<string, Placement[]>): Record {
     const belt = getFootprint("belt")!;
-    if (p.id === "belt") {
-        const out = beltOutput(p.rot);
-        return { ...plainRecord(p, belt), activeIndex: beltActiveIndex(out, [oppositeSide(out)], outputConnected(p, out, byCell)) };
-    }
     const ports = placementPorts(p);
-    const outs = ports.filter((q) => q.dir === "out").map((q) => q.face as Side);
-    if (outs.length !== 1) return plainRecord(p, fp);
-    const ins = ports.filter((q) => q.dir === "in").map((q) => q.face as Side);
-    const rot = beltRotationFor(outs[0]);
-    return { ...plainRecord({ ...p, rot }, belt), activeIndex: beltActiveIndex(outs[0], ins, outputConnected(p, outs[0], byCell)) };
+    const outs = p.id === "belt" ? [beltOutput(p.rot)] : ports.filter((q) => q.dir === "out").map((q) => q.face as Side);
+    const ins = p.id === "belt" ? [oppositeSide(outs[0])] : ports.filter((q) => q.dir === "in").map((q) => q.face as Side);
+    const front = beltFront(ins, outs);
+    const connected = outs.filter((o) => outputConnected(p, o, byCell));
+    return { ...plainRecord({ ...p, rot: beltRotationFor(front) }, belt), activeIndex: beltActiveIndex(front, ins, connected) };
 }
 
 /** Converts placements to blueprint buildings; lifts are grouped into one building each */
@@ -108,7 +104,7 @@ function toRecords(placements: Placement[], warnings: string[]): Record[] {
             warnings.push(`Conveyor lift piece at ${p.x},${p.y},${p.z} without a bottom piece skipped`);
             continue;
         }
-        records.push(isBeltPiece(p.id) ? beltRecord(p, fp, byCell) : plainRecord(p, fp));
+        records.push(isBeltPiece(p.id) ? beltRecord(p, byCell) : plainRecord(p, fp));
     }
     return records;
 }

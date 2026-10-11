@@ -5,7 +5,7 @@ import { beltPieceFor } from "../belt-pieces";
 import { getFootprint, type Rotation } from "../footprint";
 import { DEFAULT_MODULE_OPTIONS, generateModule } from "../generator";
 import { placementCells, validateLayout, type Placement } from "../layout";
-import { beltActiveIndex, beltOutput, beltPieceForBlueprint, beltRotationFor } from "./belts";
+import { beltActiveIndex, beltInputs, beltOutput, beltOutputs, beltPieceForBlueprint, beltRotationFor } from "./belts";
 import { bytesEqual, concatBytes } from "./bytes";
 import { buildingsOf, decodeBuilding, footprintForRow } from "./decode";
 import { readBlueprintTail, writeBlueprintFile } from "./file";
@@ -99,10 +99,31 @@ describe("grid conventions (from the player's blueprints)", () => {
         expect(beltOutput(1)).toBe("down");
         expect(beltRotationFor("up")).toBe(3);
         // Straight belt fed from behind, passing on to the next belt: the most common value (20)
-        expect(beltActiveIndex("right", ["left"], true)).toBe(20);
+        expect(beltActiveIndex("right", ["left"], ["right"])).toBe(20);
         expect(beltPieceForBlueprint(0, 20)).toEqual(beltPieceFor(["left"], ["right"])!);
         // Fed from its right side only (18): a turn
         expect(beltPieceForBlueprint(0, 18)).toEqual(beltPieceFor(["down"], ["right"])!);
+        // Fed from behind, out at the front and to its right (52): a split, no fixed piece needed
+        expect(beltActiveIndex("right", ["left"], ["right", "down"])).toBe(52);
+        expect(beltPieceForBlueprint(0, 52)).toEqual(beltPieceFor(["left"], ["right", "down"])!);
+        // Fed from behind, turning left (132)
+        expect(beltPieceForBlueprint(0, 132)).toEqual(beltPieceFor(["left"], ["up"])!);
+    });
+
+    test("split and merge pieces export as plain belts", () => {
+        const split = beltPieceFor(["left"], ["right", "down"])!;
+        const merge = beltPieceFor(["left", "up"], ["right"])!;
+        const placements: Placement[] = [
+            { uid: "a", id: split.id, x: 0, y: 0, z: 0, rot: split.rot },
+            { uid: "b", id: "belt-fixed", x: 1, y: 0, z: 0, rot: 0 },
+            { uid: "c", id: merge.id, x: 0, y: 1, z: 0, rot: merge.rot },
+        ];
+        const bp = readBlueprint(exportBlueprint(placements, { title: "split", description: "" }, PNG_1PX).bytes);
+        const names = buildingsOf(bp.body).map((b) => getProp<string>(getProp<Property[]>(b, "building"), "BuildingName"));
+        expect(names).toEqual(["Belt", "Belt", "Belt"]);
+        // Reading it back gives the same pieces
+        const ids = (list: Placement[]) => list.map((p) => `${p.id}@${p.rot}`).sort();
+        expect(ids(bp.placements)).toEqual(ids(placements));
     });
 });
 
@@ -146,13 +167,15 @@ describe("layout → blueprint", () => {
         for (const o of original) {
             const n = byPivot.get(at(o) + o.row)!;
             expect(n).toBeDefined();
-            expect([n.rot, n.base, n.area, n.extension]).toEqual([o.rot, o.base, o.area, o.extension]);
+            // A belt's front is free (players drag turns either way); its connected sides must match
+            if (o.row !== "Belt") expect(n.rot).toBe(o.rot);
+            expect([n.base, n.area, n.extension]).toEqual([o.base, o.area, o.extension]);
             for (const flag of ["IsDepend", "DependOthers"]) expect(getProp(n.props, flag)).toBe(getProp(o.props, flag));
             expect(n.dependKeys.map((k) => keyMapNew.get(k)).sort()).toEqual(o.dependKeys.map((k) => keyMapOrig.get(k)).sort());
             if (o.row === "Belt") {
-                // Input sides and the output-connected bit; higher bits are unknown and not written
                 const bai = (d: typeof o) => getProp<number>(getProp<Property[]>(d.props, "building"), "BaseActiveIndex");
-                expect(bai(n) & 0x1e).toBe(bai(o) & 0x1e);
+                const sides = (d: typeof o) => [beltInputs(d.rot as Rotation, bai(d)).sort(), beltOutputs(d.rot as Rotation, bai(d)).sort()];
+                expect(sides(n)).toEqual(sides(o));
             }
         }
     });

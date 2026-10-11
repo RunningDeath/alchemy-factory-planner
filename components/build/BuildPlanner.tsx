@@ -5,6 +5,7 @@ import { cycleVariant, inferBeltItems, placeBuilding, placementsAt, removePlacem
 import { DEFAULT_MODULE_OPTIONS, generateModule, moduleTooBig } from "../../engine/build/generator";
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
+import { lockedBuildings } from "../../engine/build/unlocks";
 import type { BuildLayoutState } from "../../engine/types";
 import { BELT_COLORS, buildingName, carriedItem, itemColorMap } from "../../lib/buildCatalog";
 import { ExportBlueprintDialog } from "./ExportBlueprintDialog";
@@ -45,6 +46,8 @@ const HISTORY_LIMIT = 50;
 export function BuildPlanner() {
     const factory = useFactoryStore((s) => s.factories.find((f) => f.id === s.activeFactoryId));
     const setBuildLayout = useFactoryStore((s) => s.setBuildLayout);
+    const unlocks = useFactoryStore((s) => s.buildUnlocks);
+    const setUnlocks = useFactoryStore((s) => s.setBuildUnlocks);
 
     const layout = factory?.buildLayout;
     const placements = layout?.placements ?? EMPTY;
@@ -132,7 +135,7 @@ export function BuildPlanner() {
         setTimeout(() => {
             // Final products always leave at the edge; surplus only if the player chose it
             const finalProducts = report.targets.map((t) => t.itemName);
-            const mod = generateModule(steps, { ...opts, beltSpeed: report.beltSpeed, finalProducts });
+            const mod = generateModule(steps, { ...opts, beltSpeed: report.beltSpeed, finalProducts, unlocks });
             commit({ placements: mod.placements, options: opts, tiers: mod.tiers, routes: mod.routes, io: mod.io, surplus: mod.surplus });
             const failed = mod.routes.filter((r) => !r.ok).length;
             flash(failed ? `${failed} belt connection${failed === 1 ? "" : "s"} could not be routed` : `All ${mod.routes.length} belt connections routed`);
@@ -240,6 +243,7 @@ export function BuildPlanner() {
     if (!factory) return null;
 
     const selected = placements.find((p) => p.uid === selectedUid);
+    const locked = lockedBuildings(new Set(placements.map((p) => p.id)), unlocks);
 
     return (
         <div className="flex flex-col h-[calc(100vh-2rem)] min-h-[680px]">
@@ -249,6 +253,7 @@ export function BuildPlanner() {
                     itemColors={itemColors}
                     defaultTitle={`${factory.name}: ${report?.targets.map((t) => t.itemName).join(", ") || "module"}`}
                     mainItem={report?.targets[0]?.itemName}
+                    locked={locked}
                     onClose={() => setExporting(false)}
                 />
             )}
@@ -278,6 +283,8 @@ export function BuildPlanner() {
                 onUndo={undo}
                 onRedo={redo}
                 onExport={() => (placements.length > 0 ? setExporting(true) : flash("Nothing to export yet"))}
+                unlocks={unlocks}
+                onUnlocksChange={setUnlocks}
             />
             <div className="flex flex-1 min-h-0">
                 <aside className="w-56 shrink-0 border-r border-[var(--border)] p-3 overflow-y-auto custom-scrollbar">
@@ -301,6 +308,11 @@ export function BuildPlanner() {
                             <span>Pick a building on the left. Click selects, right-click removes. Q/E change level.</span>
                         )}
                         {message && <span className="text-[var(--warning)] font-semibold">{message}</span>}
+                        {locked.length > 0 && (
+                            <span className="text-[var(--warning)]" title="Not unlocked at your level (see Unlocks). The game won't place a blueprint with these.">
+                                Locked: {locked.join(", ")}
+                            </span>
+                        )}
                         {hoverCell && <HoverInfo placements={placementsAt(placements, hoverCell[0], hoverCell[1], level)} />}
                     </div>
                     <ItemLegend itemColors={itemColors} highlightItem={highlightItem} onHighlight={setHighlightItem} />

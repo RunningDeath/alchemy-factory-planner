@@ -1,0 +1,542 @@
+{
+ "belt": {
+  "level": 1,
+  "via": "research",
+  "by": "Belt"
+ },
+ "belt-slope-up": {
+  "level": 1,
+  "via": "research",
+  "by": "BeltSlopeUp"
+ },
+ "belt-slope-down": {
+  "level": 1,
+  "via": "research",
+  "by": "BeltSlopeUp"
+ },
+ "belt-inclined-up": {
+  "level": 1,
+  "via": "research",
+  "by": "BeltSlopeUp"
+ },
+ "belt-inclined-down": {
+  "level": 1,
+  "via": "research",
+  "by": "BeltSlopeUp"
+ },
+ "conveyer-lift-upwards": {
+  "level": 3,
+  "via": "research",
+  "by": "ConveyerLift_Upwards"
+ },
+ "conveyer-lift-downwards": {
+  "level": 3,
+  "via": "research",
+  "by": "ConveyerLift_Upwards"
+ },
+ "conveyer-lift-end-upwards": {
+  "level": 3,
+  "via": "research",
+  "by": "ConveyerLift_Upwards"
+ },
+ "conveyer-lift-end-downwards": {
+  "level": 3,
+  "via": "research",
+  "by": "ConveyerLift_Upwards"
+ },
+ "conveyer-lift-body": {
+  "level": 3,
+  "via": "research",
+  "by": "ConveyerLift_Upwards"
+ },
+ "hopper": {
+  "level": 3,
+  "via": "research",
+  "by": "Hopper"
+ },
+ "hopper2": {
+  "level": 3,
+  "via": "research",
+  "by": "Hopper"
+ },
+ "hopper2-2": {
+  "level": 3,
+  "via": "research",
+  "by": "Hopper"
+ },
+ "hopper4": {
+  "level": 3,
+  "via": "research",
+  "by": "Hopper"
+ },
+ "pipe": {
+  "level": 4,
+  "via": "research",
+  "by": "Pipe"
+ },
+ "pipe-vertical": {
+  "level": 4,
+  "via": "research",
+  "by": "Pipe"
+ },
+ "conveyor-tunnel": {
+  "level": 3,
+  "via": "workbench",
+  "by": "Nails"
+ },
+ "conveyor-tunnel-sym": {
+  "level": 3,
+  "via": "workbench",
+  "by": "Nails"
+ },
+ "draw-bridge": {
+  "level": 4,
+  "via": "research",
+  "by": "DrawBridge"
+ },
+ "filter-vert": {
+  "level": 5,
+  "via": "research",
+  "by": "Filter_Vert"
+ },
+ "filter": {
+  "level": 5,
+  "via": "research",
+  "by": "Filter_Vert"
+ },
+ "filter-sym": {
+  "level": 5,
+  "via": "research",
+  "by": "Filter_Vert"
+ },
+ "splitter-vert": {
+  "level": 5,
+  "via": "research",
+  "by": "Splitter_Vert"
+ },
+ "splitter": {
+  "level": 5,
+  "via": "research",
+  "by": "Splitter_Vert"
+ },
+ "splitter-sym": {
+  "level": 5,
+  "via": "research",
+  "by": "Splitter_Vert"
+ },
+ "merger-vert": {
+  "level": 5,
+  "via": "research",
+  "by": "Merger_Vert"
+ },
+ "merger": {
+  "level": 5,
+  "via": "research",
+  "by": "Merger_Vert"
+ },
+ "merger-sym": {
+  "level": 5,
+  "via": "research",
+  "by": "Merger_Vert"
+ },
+ "smart-hopper": {
+  "level": 6,
+  "via": "workbench",
+  "by": "CopperBearing"
+ },
+ "grinder": {
+  "level": 1,
+  "via": "research",
+  "by": "Grinder"
+ },
+ "enhanced-grinder": {
+  "level": 5,
+  "via": "workbench",
+  "by": "SteelGear"
+ },
+ "crucible": {
+  "level": 4,
+  "via": "research",
+  "by": "Crucible"
+ },
+ "stackable-crucible": {
+  "level": 6,
+  "via": "research",
+  "by": "StackableCrucible"
+ },
+ "extractor": {
+  "level": 4,
+  "via": "research",
+  "by": "Extractor"
+ },
+ "thermal-extractor": {
+  "level": 7,
+  "via": "research",
+  "by": "ThermalExtractor"
+ },
+ "refiner": {
+  "level": 6,
+  "via": "research",
+  "by": "Refiner"
+ },
+ "refiner-sym": {
+  "level": 6,
+  "via": "research",
+  "by": "Refiner"
+ },
+ "paradox-crucible": {
+  "level": 7,
+  "via": "research",
+  "by": "ParadoxCrucible"
+ },
+ "steam-boiler": {
+  "level": 6,
+  "via": "research",
+  "by": "SteamBoiler"
+ },
+ "cauldron": {
+  "level": 6,
+  "via": "research",
+  "by": "Cauldron"
+ },
+ "advanced-cauldron": {
+  "level": 8,
+  "via": "research",
+  "by": "AdvancedCauldron"
+ },
+ "processor": {
+  "level": 2,
+  "via": "research",
+  "by": "Processor"
+ },
+ "processor-sym": {
+  "level": 2,
+  "via": "research",
+  "by": "Processor"
+ },
+ "kiln": {
+  "level": 4,
+  "via": "research",
+  "by": "Kiln"
+ },
+ "blender": {
+  "level": 4,
+  "via": "research",
+  "by": "Blender"
+ },
+ "assembler": {
+  "level": 3,
+  "via": "research",
+  "by": "Assembler"
+ },
+ "assembler-sym": {
+  "level": 3,
+  "via": "research",
+  "by": "Assembler"
+ },
+ "alembic": {
+  "level": 7,
+  "via": "research",
+  "by": "Alembic"
+ },
+ "athanor": {
+  "level": 5,
+  "via": "research",
+  "by": "Athanor"
+ },
+ "athanor-sym": {
+  "level": 5,
+  "via": "research",
+  "by": "Athanor"
+ },
+ "advanced-blender": {
+  "level": 6,
+  "via": "research",
+  "by": "AdvancedBlender"
+ },
+ "advanced-blender-sym": {
+  "level": 6,
+  "via": "research",
+  "by": "AdvancedBlender"
+ },
+ "advanced-alembic": {
+  "level": 8,
+  "via": "research",
+  "by": "AdvancedAlembic"
+ },
+ "advanced-alembic-sym": {
+  "level": 8,
+  "via": "research",
+  "by": "AdvancedAlembic"
+ },
+ "omni-machine": {
+  "level": 6,
+  "via": "research",
+  "by": "Omni-Machine"
+ },
+ "advanced-athanor": {
+  "level": 8,
+  "via": "research",
+  "by": "AdvancedAthanor"
+ },
+ "shaper": {
+  "level": 5,
+  "via": "research",
+  "by": "Shaper"
+ },
+ "advanced-shaper": {
+  "level": 7,
+  "via": "research",
+  "by": "AdvancedShaper"
+ },
+ "aether-shaper": {
+  "level": 9,
+  "via": "research",
+  "by": "AetherShaper"
+ },
+ "arcane-processor": {
+  "level": 9,
+  "via": "research",
+  "by": "ArcaneProcessor"
+ },
+ "stone-stove": {
+  "level": 3,
+  "via": "research",
+  "by": "StoneStove"
+ },
+ "stone-furnace": {
+  "level": 4,
+  "via": "research",
+  "by": "StoneFurnace"
+ },
+ "steam-heater": {
+  "level": 6,
+  "via": "research",
+  "by": "SteamHeater"
+ },
+ "brew-barrel": {
+  "level": 4,
+  "via": "research",
+  "by": "BrewBarrel"
+ },
+ "grand-portal": {
+  "level": 5,
+  "via": "workbench",
+  "by": "Level5"
+ },
+ "table-saw": {
+  "level": 1,
+  "via": "research",
+  "by": "TableSaw"
+ },
+ "stone-crusher": {
+  "level": 2,
+  "via": "research",
+  "by": "StoneCrusher"
+ },
+ "seed-plot": {
+  "level": 2,
+  "via": "research",
+  "by": "SeedPlot"
+ },
+ "iron-smelter": {
+  "level": 3,
+  "via": "research",
+  "by": "IronSmelter"
+ },
+ "nursery": {
+  "level": 4,
+  "via": "research",
+  "by": "AutoNursery"
+ },
+ "world-tree-nursery": {
+  "level": 8,
+  "via": "research",
+  "by": "WorldTreeNursery"
+ },
+ "purchasing-portal": {
+  "level": 4,
+  "via": "research",
+  "by": "Portal_AlchGuild"
+ },
+ "bank-portal": {
+  "level": 4,
+  "via": "research",
+  "by": "Portal_Bank"
+ },
+ "dispatch-portal": {
+  "level": 4,
+  "via": "quest",
+  "by": "Contract1"
+ },
+ "small-container": {
+  "level": 1,
+  "via": "research",
+  "by": "SmallContainer"
+ },
+ "small-container-sym": {
+  "level": 1,
+  "via": "research",
+  "by": "SmallContainer"
+ },
+ "small-container-side": {
+  "level": 1,
+  "via": "research",
+  "by": "SmallContainer"
+ },
+ "small-container-vert": {
+  "level": 1,
+  "via": "research",
+  "by": "SmallContainer"
+ },
+ "small-container-vert-sym": {
+  "level": 1,
+  "via": "research",
+  "by": "SmallContainer"
+ },
+ "wood-container": {
+  "level": 2,
+  "via": "research",
+  "by": "WoodContainer"
+ },
+ "wood-container-open": {
+  "level": 2,
+  "via": "research",
+  "by": "WoodContainer"
+ },
+ "wood-container-vert": {
+  "level": 2,
+  "via": "research",
+  "by": "WoodContainer"
+ },
+ "junk-barrel": {
+  "level": 2,
+  "via": "quest",
+  "by": "Carpenter2"
+ },
+ "metal-container": {
+  "level": 3,
+  "via": "workbench",
+  "by": "IronSmelter"
+ },
+ "conical-flask": {
+  "level": 4,
+  "via": "research",
+  "by": "ConicalFlask"
+ },
+ "round-bottom-flask": {
+  "level": 4,
+  "via": "research",
+  "by": "ConicalFlask"
+ },
+ "sphere-flask": {
+  "level": 4,
+  "via": "workbench",
+  "by": "ConicalFlask"
+ },
+ "frame-single": {
+  "level": 3,
+  "via": "research",
+  "by": "FrameSingle"
+ },
+ "frame-duo": {
+  "level": 3,
+  "via": "research",
+  "by": "FrameSingle"
+ },
+ "iron-stand": {
+  "level": 3,
+  "via": "research",
+  "by": "FrameSingle"
+ },
+ "iron-stand-duo": {
+  "level": 3,
+  "via": "research",
+  "by": "FrameSingle"
+ },
+ "beam3": {
+  "level": 3,
+  "via": "quest",
+  "by": "Carpenter3"
+ },
+ "beam5": {
+  "level": 3,
+  "via": "quest",
+  "by": "Carpenter3"
+ },
+ "beam10": {
+  "level": 3,
+  "via": "quest",
+  "by": "Carpenter3"
+ },
+ "beam18": {
+  "level": 3,
+  "via": "quest",
+  "by": "Carpenter3"
+ },
+ "wall-shelf": {
+  "level": 4,
+  "via": "quest",
+  "by": "Carpenter5"
+ },
+ "metal-stand": {
+  "level": 5,
+  "via": "research",
+  "by": "MetalStand"
+ },
+ "metal-stand-empty": {
+  "level": 5,
+  "via": "research",
+  "by": "MetalStand"
+ },
+ "metal-stand2": {
+  "level": 5,
+  "via": "research",
+  "by": "MetalStand"
+ },
+ "metal-stand1": {
+  "level": 5,
+  "via": "research",
+  "by": "MetalStand"
+ },
+ "small-platform": {
+  "level": 6,
+  "via": "research",
+  "by": "SmallPlatform"
+ },
+ "medium-platform": {
+  "level": 6,
+  "via": "research",
+  "by": "SmallPlatform"
+ },
+ "cross-platform": {
+  "level": 6,
+  "via": "research",
+  "by": "SmallPlatform"
+ },
+ "wood-block": {
+  "level": 1,
+  "via": "workbench",
+  "by": "TableSaw"
+ },
+ "stone-block": {
+  "level": 2,
+  "via": "workbench",
+  "by": "StoneCrusher"
+ },
+ "brick-block": {
+  "level": 4,
+  "via": "workbench",
+  "by": "Brick"
+ },
+ "iron-block": {
+  "level": 3,
+  "via": "workbench",
+  "by": "IronSmelter"
+ },
+ "marble-block": {
+  "level": 8,
+  "via": "workbench",
+  "by": "Obsidian"
+ }
+}
