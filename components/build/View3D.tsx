@@ -11,6 +11,8 @@ import { getFootprint, rotatedSize, SIDE_OFFSET } from "../../engine/build/footp
 import { placementCells, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
 import { LAYER, QUAD, type Side } from "../../engine/build/types";
 import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
+import { useGameIcons } from "../../lib/gameIcons";
+import { machineIconMeshes } from "./machineIcons";
 
 interface View3DProps {
     placements: Placement[];
@@ -432,6 +434,7 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
     const sceneRef = useRef<SceneState | null>(null);
     const byUid = useRef(new Map<string, Placement>());
     const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
+    const icons = useGameIcons();
 
     // Scene setup once
     useEffect(() => {
@@ -549,8 +552,9 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
         const outlines = machineOutlines(placements, cutLevel);
         const labels = showLabels ? blockLabels(tiers, io, placements, ports) : [];
         const perMachine = showLabels ? machineLabels(placements, cutLevel, itemColors, highlightItem) : [];
+        const machineIcons = machineIconMeshes(placements, cutLevel, itemColors, highlightItem, icons);
         const arrows = showPorts ? [arrowMesh(portArrows(placements, ports, cutLevel))] : [];
-        s.objects = [solidMesh, machineMesh, supportMesh, outlines, ...arrows, ...labels, ...perMachine];
+        s.objects = [solidMesh, machineMesh, supportMesh, outlines, ...machineIcons, ...arrows, ...labels, ...perMachine];
         s.objects.forEach((o) => s.scene.add(o));
         s.machineLabels = perMachine;
         s.pickables = [
@@ -571,7 +575,7 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
             s.camera.position.set(center.x + radius * 0.9, center.y + radius * 1.0, center.z + radius * 1.1);
             s.framed = true;
         }
-    }, [placements, tiers, io, ports, itemColors, highlightItem, issuesByUid, selectedUid, cutLevel, showSupports, showLabels, showPorts]);
+    }, [placements, tiers, io, ports, itemColors, highlightItem, issuesByUid, selectedUid, cutLevel, showSupports, showLabels, showPorts, icons]);
 
     return (
         <div className="relative w-full h-full min-h-[320px]">
@@ -590,7 +594,7 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
                     ports: <span style={{ color: "#5dd97a" }}>▲ input</span> <span style={{ color: "#f0a040" }}>▲ output</span>{" "}
                     <span style={{ color: "#e05555" }}>▲ not connected</span> · light cones: belt direction
                 </span>
-                <span>drag orbit · right-drag pan · scroll zoom · hover for names · zoom in to see what each machine makes</span>
+                <span>drag orbit · right-drag pan · scroll zoom · machines show what they make on top and what they are on the sides · hover for names · zoom in for text labels</span>
             </div>
         </div>
     );

@@ -50,3 +50,6 @@ next-env.d.ts
 
 # agent worktrees
 /.claude/worktrees/
+
+# game icons exported locally by tools/extract-game-data (game assets, not ours to commit)
+/public/game-icons/

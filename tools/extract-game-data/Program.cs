@@ -4,6 +4,7 @@
 // data/building-footprints.json, scripts/build-unlocks.ts into data/building-unlocks.json.
 //
 // Usage: dotnet run -- <paks dir> <mappings.usmap> <out.json>
+//        dotnet run -- icons <paks dir> <mappings.usmap> <repo root>   (see Icons.cs)
 // The game uses unversioned properties, so a .usmap is required (see README.md).
 using CUE4Parse.Compression;
 using CUE4Parse.FileProvider;
@@ -13,9 +14,12 @@ using CUE4Parse.UE4.Localization;
 using CUE4Parse.UE4.Versions;
 using Newtonsoft.Json;
 
+var iconsMode = args.Length > 0 && args[0] == "icons";
+if (iconsMode) args = args[1..];
 if (args.Length < 3)
 {
     Console.Error.WriteLine("Usage: dotnet run -- <paks dir> <mappings.usmap> <out.json>");
+    Console.Error.WriteLine("       dotnet run -- icons <paks dir> <mappings.usmap> <repo root>");
     return 1;
 }
 var (paksDir, usmapPath, outPath) = (args[0], args[1], args[2]);
@@ -39,6 +43,8 @@ provider.Mount();
 Dictionary<string, CUE4Parse.UE4.Assets.Objects.FStructFallback> Rows(string name) =>
     provider.LoadPackageObject<UDataTable>($"AlchemyFactory/Content/DataTables/{name}.{name}").RowMap.ToDictionary(kv => kv.Key.Text, kv => kv.Value);
 var rows = Rows("DT_Buildings");
+
+if (iconsMode) return await Icons.Export(provider, rows, outPath);
 
 // English strings, keyed by localization key (DisplayName.Key in the rows)
 var locres = new FTextLocalizationResource(provider.CreateReader("AlchemyFactory/Content/Localization/Game/en/Game.locres"));
