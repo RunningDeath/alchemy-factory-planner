@@ -53,6 +53,8 @@ export interface RoutingOutput {
     placements: Placement[];
     routes: RouteResult[];
     io: IoPoint[];
+    /** Output nobody in the module uses that isn't sent out at the edge (the line just runs slower) */
+    surplus: { itemName: string; rate: number }[];
 }
 
 export interface RouterOptions {
@@ -64,7 +66,11 @@ export interface RouterOptions {
     blockNames: string[];
     /** Drawbridge conveyors may cross gaps without supports (needs the unlock and linen rope) */
     bridges?: boolean;
+    /** Unused output of these items stays in the line instead of leaving at the module edge */
+    keepItems?: string[];
 }
+
+const PRIORITY_SPLITTER = "splitter-vert";
 
 /** Drawbridge conveyor: anchor post (3 high, needs support) and a 3-cell deck that needs none */
 const BRIDGE_ID = "draw-bridge";
@@ -120,7 +126,11 @@ interface Connection {
 }
 
 /** Match producers to consumers per item; the rest is imported or exported */
-export function assignFlows(ends: LaneEnd[]): Connection[] {
+/**
+ * `exportable`: items whose unused output leaves at the module edge (final products and
+ * the surplus the player chose). Without it, all unused output is exported.
+ */
+export function assignFlows(ends: LaneEnd[], exportable?: (itemName: string) => boolean, surplus?: { itemName: string; rate: number }[]): Connection[] {
     const items = new Set(ends.flatMap((e) => e.items.map((i) => i.itemName)));
     const connections: Connection[] = [];
     const byPosition = (a: LaneEnd, b: LaneEnd) => a.port[0] + a.port[1] * 0.01 - (b.port[0] + b.port[1] * 0.01);
@@ -147,7 +157,11 @@ export function assignFlows(ends: LaneEnd[]): Connection[] {
             if (demand[j] <= 1e-6) j++;
         }
         for (; j < consumers.length; j++) if (demand[j] > 1e-6) connections.push({ itemName, rate: demand[j], from: "import", to: consumers[j] });
-        for (; i < producers.length; i++) if (supply[i] > 1e-6) connections.push({ itemName, rate: supply[i], from: producers[i], to: "export" });
+        for (; i < producers.length; i++) {
+            if (supply[i] <= 1e-6) continue;
+            if (!exportable || exportable(itemName)) connections.push({ itemName, rate: supply[i], from: producers[i], to: "export" });
+            else surplus?.push({ itemName, rate: supply[i] });
+        }
     }
     return connections;
 }
@@ -275,6 +289,9 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const minY = Math.min(...cells.map((c) => c.y)) - options.margin;
     const maxY = Math.max(...cells.map((c) => c.y)) + options.margin;
     const maxZ = Math.max(1, options.maxHeight - 1);
+    // Middle of the module: routes are pulled slightly inward, along the other belts
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
     const inBounds = (c: Cell) => c[0] >= minX && c[0] <= maxX && c[1] >= minY && c[1] <= maxY && c[2] >= 0 && c[2] <= maxZ;
     const onEdge = (c: Cell) => c[2] === 0 && (c[0] === minX || c[0] === maxX || c[1] === minY || c[1] === maxY);
 
@@ -326,7 +343,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                 if (routed) return !routed.lift;
                 return (occupancy.get(keyOf(n)) ?? []).some((o) => o.id.startsWith("belt"));
             });
-            return 1 + (turned ? 0.3 : 0) + s * 0.8 + c[2] * 0.3 - (besideBelt ? 0.35 : 0);
+            const outward = (Math.abs(c[0] - centerX) + Math.abs(c[1] - centerY)) * 0.03;
+            return 1 + (turned ? 0.3 : 0) + s * 0.8 + c[2] * 0.3 - (besideBelt ? 0.35 : 0) + outward;
         };
 
         for (const s of starts) {
@@ -550,13 +568,49 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         }
     }
 
+    /** A priority splitter right at an exit, if it fits: its first output feeds the module, the second the edge */
+    function prioritySplitter(exit: LaneEnd, itemName: string) {
+        const dir = exit.dir;
+        const cells: Cell[] = [exit.port, add(exit.port, dir)].flatMap((c) => [c, [c[0], c[1], c[2] + 1] as Cell]);
+        const free = cells.every((c) => inBounds(c) && !nodes.has(keyOf(c)) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0));
+        if (!free) return null;
+        const xs = cells.map((c) => c[0]);
+        const ys = cells.map((c) => c[1]);
+        // Unrotated: in on the left, both outputs on the right (lower first, upper second)
+        const placement: Placement = { uid: makeUid("p"), id: PRIORITY_SPLITTER, x: Math.min(...xs), y: Math.min(...ys), z: exit.port[2], rot: rotFor("right", dir), label: itemName, lane: "route" };
+        const out = add(add(exit.port, dir), dir);
+        const end = (z: number, suffix: string): LaneEnd => ({ uid: `${placement.uid}:${suffix}`, kind: "out", items: exit.items, port: [out[0], out[1], z], dir, block: exit.block });
+        return { placement, cells, first: end(exit.port[2], "first"), overflow: end(exit.port[2] + 1, "overflow") };
+    }
+
     const treeTotals = new Map<string, number>();
     const routes: RouteResult[] = [];
     const io: IoPoint[] = [];
     const exitUsed = new Set<string>();
     const entryFed = new Set<string>();
 
-    const connections = assignFlows(ends);
+    const surplusList: { itemName: string; rate: number }[] = [];
+    const exportable = options.keepItems ? (item: string) => !options.keepItems!.includes(item) : undefined;
+    const connections = assignFlows(ends, exportable, surplusList);
+
+    // An exit that feeds consumers and also exports its surplus gets a priority splitter:
+    // consumers first, only the overflow leaves at the edge (a plain split would halve them)
+    for (const exit of ends.filter((e) => e.kind === "out")) {
+        const mine = connections.filter((c) => c.from === exit);
+        const overflow = mine.find((c) => c.to === "export");
+        if (!overflow || mine.length < 2) continue;
+        const splitter = prioritySplitter(exit, overflow.itemName);
+        if (!splitter) continue;
+        all.push(splitter.placement);
+        byUid.set(splitter.placement.uid, splitter.placement);
+        addToOccupancy(occupancy, splitter.placement);
+        // Both bottom cells of the splitter stand on something
+        for (const c of [exit.port, add(exit.port, exit.dir)]) all.push(...supportColumn(occupancy, c[0], c[1], c[2], 0, () => makeUid("s")));
+        splitter.cells.forEach((c) => reserved.add(keyOf(c)));
+        for (const c of mine) c.from = c.to === "export" ? splitter.overflow : splitter.first;
+        reserveEnd(splitter.first);
+        reserveEnd(splitter.overflow);
+    }
     const distance = (c: Connection) => {
         if (c.from === "import" || c.to === "export") return 1e6;
         return Math.abs(c.from.port[0] - c.to.port[0]) + Math.abs(c.from.port[1] - c.to.port[1]) + Math.abs(c.from.port[2] - c.to.port[2]);
@@ -670,7 +724,9 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         routes.push({ itemName: conn.itemName, from: endName(conn.from), to: endName(conn.to), rate: conn.rate, ok, key: connKey(conn) });
     }
 
-    return { placements: all, routes, io };
+    // Merge surplus per item
+    const surplus = [...surplusList.reduce((m, x) => m.set(x.itemName, (m.get(x.itemName) ?? 0) + x.rate), new Map<string, number>())].map(([itemName, rate]) => ({ itemName, rate }));
+    return { placements: all, routes, io, surplus };
 }
 
 /** For tests and checks: does any router belt overlap something it shouldn't? */

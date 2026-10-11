@@ -3,7 +3,7 @@
  */
 import { beltPieceFor, isBeltPiece } from "./belt-pieces";
 import { getFootprint, type Rotation } from "./footprint";
-import { buildOccupancy, cellKey, cellsCollide, placementCells, type Placement } from "./layout";
+import { buildOccupancy, cellKey, cellsCollide, placementCells, portConnections, type Placement } from "./layout";
 import type { Side } from "./types";
 
 export type PlaceResult =
@@ -96,4 +96,61 @@ export function lPath(a: [number, number], b: [number, number]): [number, number
     for (let y = a[1]; y !== b[1]; y += stepY) cells.push([b[0], y]);
     cells.push([b[0], b[1]]);
     return cells;
+}
+
+const isConveyor = (id: string) => isBeltPiece(id) || id.startsWith("conveyer-lift") || id === "draw-bridge";
+const isSingleItem = (label?: string) => !!label && !label.includes(" + ") && !label.startsWith("filter:");
+
+/**
+ * Works out what hand-drawn belts carry: items flow from machine outputs and from belts
+ * that already know their item, downstream through connected belts and lifts. Generated
+ * belts keep their labels; hand-drawn ones (no lane) get the item that reaches them, or
+ * none when nothing (or more than one item) does.
+ */
+export function inferBeltItems(placements: Placement[]): Placement[] {
+    const byUid = new Map(placements.map((p) => [p.uid, p]));
+    const manual = (p: Placement) => isConveyor(p.id) && !p.lane;
+
+    // Where items go next: port connections, plus bottom → top inside a lift column
+    const next = new Map<string, string[]>();
+    const link = (from: string, to: string) => next.set(from, [...(next.get(from) ?? []), to]);
+    for (const s of portConnections(placements)) {
+        if (s.connectedTo && s.port.dir === "out") link(s.port.uid, s.connectedTo);
+    }
+    const liftColumns = new Map<string, Placement[]>();
+    placements.filter((p) => p.id.startsWith("conveyer-lift")).forEach((p) => {
+        const key = `${p.x},${p.y}`;
+        liftColumns.set(key, [...(liftColumns.get(key) ?? []), p]);
+    });
+    for (const column of liftColumns.values()) {
+        for (const a of column) for (const b of column) if (a !== b) link(a.uid, b.uid);
+    }
+
+    // Sources: machines (their product) and belts with a known single item
+    const reached = new Map<string, Set<string>>();
+    const queue: [string, string][] = [];
+    for (const p of placements) {
+        const category = getFootprint(p.id)?.category;
+        const item = category === "production" ? p.label : isConveyor(p.id) && !manual(p) && isSingleItem(p.label) ? p.label : undefined;
+        if (item) queue.push([p.uid, item]);
+    }
+    while (queue.length) {
+        const [uid, item] = queue.pop()!;
+        for (const to of next.get(uid) ?? []) {
+            const target = byUid.get(to);
+            if (!target || !manual(target)) continue;
+            const items = reached.get(to) ?? new Set<string>();
+            if (items.has(item)) continue;
+            items.add(item);
+            reached.set(to, items);
+            queue.push([to, item]);
+        }
+    }
+
+    return placements.map((p) => {
+        if (!manual(p)) return p;
+        const items = reached.get(p.uid);
+        const label = items && items.size > 0 ? [...items].join(" + ") : undefined;
+        return p.label === label ? p : { ...p, label };
+    });
 }

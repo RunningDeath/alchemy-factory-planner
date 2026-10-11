@@ -128,3 +128,24 @@ describe("one input belt per item per block", () => {
     expectFullyConnected(mod);
   });
 });
+
+describe("surplus", () => {
+  const surplusSteps = [
+    step({ nodeKey: "g", itemName: "Flax Fiber", deviceId: "grinder", machines: 2, inputs: [{ itemName: "Flax", perMachineRate: 40 }], outputs: [{ itemName: "Flax Fiber", perMachineRate: 40 }] }),
+    step({ nodeKey: "a", itemName: "Linen", machines: 1, inputs: [{ itemName: "Flax Fiber", perMachineRate: 50 }], outputs: [{ itemName: "Linen", perMachineRate: 10 }] }),
+  ];
+
+  test("by default the overflow leaves through a priority splitter, consumers first", () => {
+    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"] });
+    expectFullyConnected(mod);
+    expect(mod.io.some((p) => p.kind === "export" && p.itemName === "Flax Fiber")).toBe(true);
+    expect(mod.placements.some((p) => p.id === "splitter-vert")).toBe(true);
+  });
+
+  test("kept surplus stays in the line: no export, no splitter", () => {
+    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"], keepItems: ["Flax Fiber"] });
+    expect(mod.io.some((p) => p.itemName === "Flax Fiber")).toBe(false);
+    expect(mod.surplus.map((x) => x.itemName)).toEqual(["Flax Fiber"]);
+    expect(validateLayout(mod.placements)).toEqual([]);
+  });
+});

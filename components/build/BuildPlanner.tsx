@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cycleVariant, placeBuilding, placementsAt, removePlacement } from "../../engine/build/edit";
+import { cycleVariant, inferBeltItems, placeBuilding, placementsAt, removePlacement } from "../../engine/build/edit";
 import { DEFAULT_MODULE_OPTIONS, generateModule } from "../../engine/build/generator";
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
@@ -106,7 +106,8 @@ export function BuildPlanner() {
     );
 
     const setPlacements = useCallback(
-        (next: Placement[]) => commit({ ...(layout ?? {}), placements: next }),
+        // Hand-drawn belts pick up the item that reaches them, for colour and tooltip
+        (next: Placement[]) => commit({ ...(layout ?? {}), placements: inferBeltItems(next) }),
         [commit, layout],
     );
 
@@ -115,19 +116,31 @@ export function BuildPlanner() {
         setTimeout(() => setMessage((m) => (m === text ? null : m)), 2500);
     };
 
-    const handleGenerate = () => {
+    const runGenerate = (opts: typeof options) => {
         if (!report || steps.length === 0) return;
-        if (placements.length > 0 && !window.confirm("Replace the current layout with a generated module?")) return;
         // Routing takes a moment: show that before the browser is busy
         setMessage("Generating module and routing belts…");
         setTimeout(() => {
-            const mod = generateModule(steps, { ...options, beltSpeed: report.beltSpeed });
-            commit({ placements: mod.placements, options, tiers: mod.tiers, routes: mod.routes, io: mod.io });
+            // Final products always leave at the edge; surplus only if the player chose it
+            const finalProducts = report.targets.map((t) => t.itemName);
+            const mod = generateModule(steps, { ...opts, beltSpeed: report.beltSpeed, finalProducts });
+            commit({ placements: mod.placements, options: opts, tiers: mod.tiers, routes: mod.routes, io: mod.io, surplus: mod.surplus });
             const failed = mod.routes.filter((r) => !r.ok).length;
             flash(failed ? `${failed} belt connection${failed === 1 ? "" : "s"} could not be routed` : `All ${mod.routes.length} belt connections routed`);
             setLevel(0);
             setSelectedUid(null);
         }, 30);
+    };
+
+    const handleGenerate = () => {
+        if (placements.length > 0 && !window.confirm("Replace the current layout with a generated module?")) return;
+        runGenerate(options);
+    };
+
+    /** Send an item's surplus out at the edge (via a priority splitter) or keep it in the line, then lay out again */
+    const toggleExport = (itemName: string, on: boolean) => {
+        const kept = options.keepItems ?? [];
+        runGenerate({ ...options, keepItems: on ? kept.filter((i) => i !== itemName) : [...new Set([...kept, itemName])] });
     };
 
     const handlePlace = (pending: Placement[]) => {
@@ -324,6 +337,10 @@ export function BuildPlanner() {
                         tiers={layout?.tiers ?? []}
                         routes={layout?.routes ?? []}
                         io={layout?.io ?? []}
+                        surplus={layout?.surplus ?? []}
+                        keepItems={options.keepItems ?? []}
+                        finalProducts={report?.targets.map((t) => t.itemName) ?? []}
+                        onToggleExport={toggleExport}
                         onSelect={setSelectedUid}
                         onGoToLevel={setLevel}
                     />

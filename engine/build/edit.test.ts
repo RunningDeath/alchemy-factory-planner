@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { footprintPorts, getFootprint } from "./footprint";
-import { beltPath, cycleVariant, lPath, placeBuilding, placementsAt } from "./edit";
+import { beltPath, cycleVariant, inferBeltItems, lPath, placeBuilding, placementsAt } from "./edit";
 import type { Placement } from "./layout";
 
 let n = 0;
@@ -53,5 +53,20 @@ describe("cycleVariant", () => {
   test("follows the game's build option chain", () => {
     expect(cycleVariant("assembler")).toBe("assembler-sym");
     expect(cycleVariant("assembler-sym")).toBe("assembler");
+  });
+});
+
+describe("inferBeltItems", () => {
+  test("a hand-drawn belt from a machine output carries that machine's product", () => {
+    const asm: Placement = { uid: "a", id: "assembler", x: 0, y: 0, z: 0, rot: 0, label: "Healing Potion" };
+    // Output port at (1,0) facing right → belt cells from x=2 to the right
+    const drawn = beltPath([[2, 0], [3, 0], [3, 1]], 0, uid);
+    const result = inferBeltItems([asm, ...drawn]);
+    expect(result.filter((p) => p.id.startsWith("belt")).every((p) => p.label === "Healing Potion")).toBe(true);
+  });
+
+  test("an unconnected hand-drawn belt carries nothing", () => {
+    const drawn = beltPath([[5, 5], [6, 5]], 0, uid);
+    expect(inferBeltItems(drawn).every((p) => p.label === undefined)).toBe(true);
   });
 });

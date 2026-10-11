@@ -149,13 +149,15 @@ export type ViewMode = "graph" | "list" | "build";
 export interface BuildLayoutState {
   placements: Placement[];
   /** Generator settings last used for this factory */
-  options?: { maxWidth: number; maxDepth: number; maxStack: number; maxHeight?: number; useBridges?: boolean };
+  options?: { maxWidth: number; maxDepth: number; maxStack: number; maxHeight?: number; useBridges?: boolean; keepItems?: string[] };
   /** Tiers and lanes of the last generated module */
   tiers?: TierInfo[];
   /** Belt connections between blocks of the last generated module */
   routes?: RouteResult[];
   /** Where raw materials come in and products leave */
   io?: IoPoint[];
+  /** Unused output that isn't sent out (the player can choose to export it) */
+  surplus?: { itemName: string; rate: number }[];
 }
 
 export interface FactoryState {

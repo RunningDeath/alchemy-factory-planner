@@ -62,6 +62,10 @@ export interface ModuleOptions {
     beltSpeed: number;
     /** Let belts cross gaps on drawbridge conveyors (needs the unlock; costs linen rope) */
     useBridges?: boolean;
+    /** The plan's targets: always sent out at the module edge */
+    finalProducts?: string[];
+    /** Surplus and byproducts that stay in the line instead of leaving at the edge */
+    keepItems?: string[];
 }
 
 /** One storey: walls and pillars are 16 cells high */
@@ -122,6 +126,8 @@ export interface GeneratedModule {
     /** Belt connections between blocks, imports and exports */
     routes: RouteResult[];
     io: IoPoint[];
+    /** Unused output that stays in the line */
+    surplus: { itemName: string; rate: number }[];
 }
 
 /** Free cells around each block, so belts can run between blocks; wider when routing fails */
@@ -933,8 +939,10 @@ function layOut(
               maxHeight: options.maxHeight,
               blockNames: tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`),
               bridges: options.useBridges,
+              // Final products always leave; chosen surplus stays in the line
+              keepItems: (options.keepItems ?? []).filter((item) => !(options.finalProducts ?? []).includes(item)),
           })
-        : { placements: [], routes: [], io: [] };
+        : { placements: [], routes: [], io: [], surplus: [] };
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
     // beams instead of pillars under longer raised belt runs
     routed.placements = beamsUnderRuns(preferBlocks(routed.placements), () => nextUid("bm"));
@@ -951,5 +959,5 @@ function layOut(
               Math.max(...cells.map((c) => c[5])),
           ]
         : [0, 0, 0];
-    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io };
+    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io, surplus: routed.surplus };
 }

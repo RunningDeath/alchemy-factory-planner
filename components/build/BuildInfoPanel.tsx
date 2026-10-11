@@ -14,6 +14,10 @@ interface BuildInfoPanelProps {
     tiers: TierInfo[];
     routes: RouteResult[];
     io: IoPoint[];
+    surplus: { itemName: string; rate: number }[];
+    keepItems: string[];
+    finalProducts: string[];
+    onToggleExport: (itemName: string, on: boolean) => void;
     onSelect: (uid: string) => void;
     onGoToLevel: (z: number) => void;
 }
@@ -26,7 +30,7 @@ const ISSUE_TEXT: Record<LayoutIssue["kind"], string> = {
     unheated: "needs a heating device under it",
 };
 
-export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, onSelect, onGoToLevel }: BuildInfoPanelProps) {
+export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, surplus, keepItems, finalProducts, onToggleExport, onSelect, onGoToLevel }: BuildInfoPanelProps) {
     const byUid = useMemo(() => new Map(placements.map((p) => [p.uid, p])), [placements]);
     const bounds = useMemo(() => layoutBounds(placements), [placements]);
     const bill = useMemo(() => [...billOfMaterials(placements).entries()].sort((a, b) => b[1] - a[1]), [placements]);
@@ -82,6 +86,9 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, o
             </section>
 
             {routes.length > 0 && <ConnectionsSection routes={routes} io={io} />}
+            {routes.length > 0 && (
+                <SurplusSection io={io} surplus={surplus} keepItems={keepItems} finalProducts={finalProducts} onToggle={onToggleExport} />
+            )}
 
             {tiers.length > 0 && (
                 <section className="flex flex-col gap-2">
@@ -190,6 +197,48 @@ function ConnectionsSection({ routes, io }: { routes: RouteResult[]; io: IoPoint
                     Not routed: {r.itemName} {formatRate(r.rate)}/m {r.from} → {r.to}
                 </span>
             ))}
+        </section>
+    );
+}
+
+/**
+ * Output nobody in the module uses (rounded-up machines, byproducts). Final products always
+ * leave at the edge. Surplus leaves too by default, through a priority splitter so the
+ * module's own consumers come first; the player can keep it in the line instead.
+ */
+function SurplusSection({
+    io,
+    surplus,
+    keepItems,
+    finalProducts,
+    onToggle,
+}: {
+    io: IoPoint[];
+    surplus: { itemName: string; rate: number }[];
+    keepItems: string[];
+    finalProducts: string[];
+    onToggle: (itemName: string, on: boolean) => void;
+}) {
+    const exported = new Map<string, number>();
+    io.filter((p) => p.kind === "export").forEach((p) => exported.set(p.itemName, (exported.get(p.itemName) ?? 0) + p.rate));
+    const rows = [
+        ...[...exported.entries()].filter(([item]) => !finalProducts.includes(item)).map(([itemName, rate]) => ({ itemName, rate, on: true })),
+        ...surplus.map((x) => ({ ...x, on: false })),
+    ].filter((r) => r.on || keepItems.includes(r.itemName));
+    if (rows.length === 0) return null;
+    return (
+        <section className="flex flex-col gap-1">
+            <h4 className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Surplus and byproducts</h4>
+            {rows.map((r) => (
+                <label key={r.itemName} className="flex items-center gap-2 cursor-pointer text-[var(--text-secondary)]">
+                    <input type="checkbox" checked={r.on} onChange={(e) => onToggle(r.itemName, e.target.checked)} className="accent-[var(--accent-gold)]" />
+                    <span>
+                        {r.itemName} {formatRate(r.rate)}/m
+                        <span className="text-[var(--text-muted)]">{r.on ? " · overflow sent out (priority splitter: consumers first)" : " · stays in the line"}</span>
+                    </span>
+                </label>
+            ))}
+            <p className="text-[var(--text-muted)]">Final products always leave at the edge. Changing this lays the module out again.</p>
         </section>
     );
 }
