@@ -115,12 +115,14 @@ export function FactorySettingsPanel({
         selfFertilizer: activeFactory.config.selfFertilizer ?? true,
         planParallelLines: activeFactory.config.planParallelLines ?? true,
         machineRounding: activeFactory.config.machineRounding ?? DEFAULT_ROUNDING,
+        useCauldron: activeFactory.config.useCauldron ?? false,
+        cauldronBuyInputs: activeFactory.config.cauldronBuyInputs ?? false,
     };
 
     const sortedFertilizers = [...fertilizers].sort((a, b) => (a.nutrient_value || 0) - (b.nutrient_value || 0));
     const sortedFuels = [...fuels].sort((a, b) => (a.heat_value || 0) - (b.heat_value || 0));
 
-    const updateConfig = (field: "selectedFertilizer" | "selectedFuel" | "selfFuel" | "selfFertilizer" | "planParallelLines" | "machineRounding", value: string | boolean) => {
+    const updateConfig = (field: "selectedFertilizer" | "selectedFuel" | "selfFuel" | "selfFertilizer" | "planParallelLines" | "machineRounding" | "useCauldron" | "cauldronBuyInputs", value: string | boolean) => {
         updateFactoryConfig(activeFactory.id, { [field]: value });
     };
 
@@ -221,6 +223,34 @@ export function FactorySettingsPanel({
                         />
                         <span>Plan parallel lines for flows over the belt limit</span>
                     </label>
+                </div>
+
+                <div>
+                    <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 flex items-center tracking-wide">
+                        Cauldron
+                        <InfoTooltip text="The cauldron turns any three materials into one, picked by their cauldron values. Where that takes fewer steps than the usual chain, the plan uses it instead (cheapest mix wins)." />
+                    </label>
+                    <div className="flex flex-col gap-1.5">
+                        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={config.useCauldron}
+                                onChange={(e) => updateConfig("useCauldron", e.target.checked)}
+                                className="accent-[var(--accent-gold)] cursor-pointer"
+                            />
+                            <span>Use cauldron where it shortens the chain</span>
+                        </label>
+                        <label className={`flex items-center gap-2 text-xs text-[var(--text-secondary)] transition-colors ${config.useCauldron ? "cursor-pointer hover:text-[var(--text-primary)]" : "opacity-40"}`}>
+                            <input
+                                type="checkbox"
+                                checked={config.cauldronBuyInputs}
+                                disabled={!config.useCauldron}
+                                onChange={(e) => updateConfig("cauldronBuyInputs", e.target.checked)}
+                                className="accent-[var(--accent-gold)] cursor-pointer"
+                            />
+                            <span>Buy cauldron inputs at the portal (seeds, sigils, ores)</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div>

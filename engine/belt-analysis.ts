@@ -11,6 +11,7 @@ import { EfficiencyContext } from "./lp-planner/types";
 import { getEffectiveRecipeTime, getItem, normalizeItemId } from "./item-utils";
 import { FLUID_CATEGORIES, FLUID_ITEMS, RATE_EPSILON, inputBeltsAllowed } from "./game-constants";
 import { collectPlanGraph, nodeKeyOf, splitEdgeKey } from "./plan-graph";
+import { cauldronRecipeById } from "./cauldron";
 import { FlowEdge, FlowNode, simulateFlow } from "./flow";
 import {
   BeltUtilization,
@@ -199,7 +200,7 @@ export function analyzeNode(
   const rounding = resolveRounding(nodeKey, options);
   const splitLines = active && !isFluid;
 
-  const recipe = node.recipeId && !node.isRaw ? recipesById.get(node.recipeId) : undefined;
+  const recipe = node.recipeId && !node.isRaw ? (recipesById.get(node.recipeId) ?? cauldronRecipeById(node.recipeId)) : undefined;
   const flows = recipe ? perMachineFlows(recipe, ctx) : { inputs: [], outputs: [] };
   const perMachineInputs = flows.inputs.map((f) => toFlowInfo(f, beltSpeed));
   const perMachineOutputs = flows.outputs.map((f) => toFlowInfo(f, beltSpeed));

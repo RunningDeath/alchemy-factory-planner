@@ -1,0 +1,212 @@
+/**
+ * The cauldron: any three materials in, one material out. Each material has a cauldron
+ * value; the three values are added (times 0.65 when two are the same, 0.5 when all
+ * three are), and out comes the material whose cauldron target is nearest that sum.
+ * Formula as used by the community calculators (e.g. the Alchemy Codex and
+ * Children-of-Sun's cauldron tool); values from the game data (data/items.json).
+ *
+ * With "use cauldron" the planner swaps a material's production chain for a cauldron
+ * recipe when that takes fewer steps: three simple inputs instead of a long chain.
+ */
+import recipesData from "../data/recipes.json";
+import itemsData from "../data/items.json";
+import { FLUID_CATEGORIES, FLUID_ITEMS } from "./game-constants";
+import type { Item, Recipe } from "./types";
+
+const items = itemsData as unknown as Item[];
+const baseRecipes = recipesData as unknown as Recipe[];
+const itemById = new Map(items.map((i) => [i.id, i]));
+
+/** Liquids travel in pipes and can't go into the cauldron */
+function isFluidItem(id: string): boolean {
+    const item = itemById.get(id);
+    if (!item) return false;
+    if ((FLUID_ITEMS as readonly string[]).includes(id)) return true;
+    const categories: string[] = Array.isArray(item.category) ? item.category : [item.category];
+    return categories.some((c) => (FLUID_CATEGORIES as readonly string[]).includes(c));
+}
+
+/** Time per craft by target value (interpolated between these points) */
+const TIME_POINTS: [number, number][] = [
+    [1, 3],
+    [100, 6],
+    [1000, 12],
+    [10000, 24],
+    [1000000, 60],
+];
+
+export function cauldronTime(target: number): number {
+    if (target <= TIME_POINTS[0][0]) return TIME_POINTS[0][1];
+    for (let i = 0; i < TIME_POINTS.length - 1; i++) {
+        const [t0, s0] = TIME_POINTS[i];
+        const [t1, s1] = TIME_POINTS[i + 1];
+        if (target <= t1) return Math.round((s0 + ((target - t0) / (t1 - t0)) * (s1 - s0)) * 10) / 10;
+    }
+    return TIME_POINTS[TIME_POINTS.length - 1][1];
+}
+
+/** Materials the cauldron can make: a target value and a non-zero weight */
+const outputs = items
+    .filter((i) => i.cauldron_target !== undefined && (i.cauldron_coef ?? 0) > 0 && !isFluidItem(i.id))
+    .map((i) => ({ id: i.id, target: i.cauldron_target!, weight: i.cauldron_coef! }))
+    .sort((a, b) => a.target - b.target);
+
+/** What the cauldron makes from these three materials */
+export function cauldronOutput(ids: [string, string, string]): string | null {
+    const values = ids.map((id) => itemById.get(id)?.cauldron_cost);
+    if (values.some((v) => v === undefined)) return null;
+    const distinct = new Set(ids).size;
+    const ratio = distinct === 1 ? 0.5 : distinct === 2 ? 0.65 : 1;
+    const sum = values.reduce((s, v) => s! + v!, 0)! * ratio;
+    let best: (typeof outputs)[number] | null = null;
+    let bestDistance = Infinity;
+    for (const o of outputs) {
+        const d = Math.abs(sum - o.target) * o.weight;
+        if (d < bestDistance - 1e-9) {
+            best = o;
+            bestDistance = d;
+        }
+    }
+    return best?.id ?? null;
+}
+
+function makeSteps(leaf: (id: string) => number) {
+    const memo = new Map<string, number>();
+    const steps = (id: string, seen = new Set<string>()): number => {
+        if (memo.has(id)) return memo.get(id)!;
+        if (seen.has(id)) return Infinity;
+        const recipes = baseRecipes.filter((r) => r.crafted_in !== "cauldron" && r.outputs.some((o) => (o.id ?? o.name) === id));
+        if (recipes.length === 0) {
+            memo.set(id, leaf(id));
+            return leaf(id);
+        }
+        seen.add(id);
+        let best = Infinity;
+        for (const r of recipes) {
+            const inputs = [...new Set(r.inputs.map((i) => i.id ?? i.name))];
+            best = Math.min(best, 1 + inputs.reduce((sum, i) => sum + steps(i, seen), 0));
+        }
+        seen.delete(id);
+        if (seen.size === 0) memo.set(id, best);
+        return best;
+    };
+    return steps;
+}
+
+/**
+ * Production steps an item takes when made the usual way: its recipe tree counted in
+ * distinct steps (anything without a recipe is bought, like the planner does)
+ */
+export const productionSteps = makeSteps(() => 0);
+/** Steps from what the purchasing portal sells; Infinity when the chain needs something it doesn't */
+const stepsFromPortal = makeSteps((id) => (itemById.get(id)?.purchasable ? 0 : Infinity));
+
+export interface CauldronRecipe extends Recipe {
+    /** Steps of the cauldron route: the cauldron plus making its inputs */
+    steps: number;
+    /** Steps the usual route takes */
+    usualSteps: number;
+    /** Some input comes straight from the purchasing portal */
+    buysInputs: boolean;
+}
+
+export interface CauldronOptions {
+    /** Inputs may be bought at the purchasing portal (seeds, sigils, ores); otherwise they are made in the module */
+    buyInputs: boolean;
+}
+
+/** Materials worth putting in: a cauldron value, not a fluid, and bought or made from bought ones in a step or two */
+const MAX_INPUT_STEPS = 2;
+const candidates = items
+    .filter((i) => (i.cauldron_cost ?? 0) > 0 && !isFluidItem(i.id) && stepsFromPortal(i.id) <= MAX_INPUT_STEPS)
+    .map((i) => {
+        const steps = stepsFromPortal(i.id);
+        // Rough price to rank variants by; the planner works out the real cost
+        return { id: i.id, name: i.name, value: i.cauldron_cost!, steps, bought: steps === 0, price: (steps === 0 ? i.cost : i.base_cost) ?? i.cost ?? 0 };
+    });
+type Candidate = (typeof candidates)[number];
+
+interface Variant {
+    picks: Candidate[];
+    steps: number;
+    distinct: number;
+    off: number;
+    price: number;
+    bought: boolean;
+}
+
+/** Every three-input mix, by what it makes */
+function allMixes(): Map<string, Variant[]> {
+    const byOutput = new Map<string, Variant[]>();
+    const n = candidates.length;
+    for (let a = 0; a < n; a++)
+        for (let b = a; b < n; b++)
+            for (let c = b; c < n; c++) {
+                const picks = [candidates[a], candidates[b], candidates[c]];
+                const out = cauldronOutput([picks[0].id, picks[1].id, picks[2].id]);
+                if (!out || picks.some((p) => p.id === out)) continue;
+                const distinct = [...new Map(picks.map((p) => [p.id, p])).values()];
+                const target = itemById.get(out)!.cauldron_target!;
+                const ratio = distinct.length === 1 ? 0.5 : distinct.length === 2 ? 0.65 : 1;
+                const variant: Variant = {
+                    picks,
+                    steps: 1 + distinct.reduce((s, p) => s + p.steps, 0),
+                    distinct: distinct.length,
+                    off: Math.abs(picks.reduce((s, p) => s + p.value, 0) * ratio - target) / Math.max(1, target),
+                    price: picks.reduce((s, p) => s + p.price, 0),
+                    bought: picks.some((p) => p.bought),
+                };
+                const list = byOutput.get(out);
+                if (list) list.push(variant);
+                else byOutput.set(out, [variant]);
+            }
+    return byOutput;
+}
+
+let mixes: Map<string, Variant[]> | null = null;
+
+function toRecipe(out: string, v: Variant): CauldronRecipe {
+    const item = itemById.get(out)!;
+    const counts = new Map<string, { id: string; name: string; count: number }>();
+    for (const p of v.picks) counts.set(p.id, { id: p.id, name: p.name, count: (counts.get(p.id)?.count ?? 0) + 1 });
+    return {
+        id: `cauldron-${out}-${v.picks.map((p) => p.id).join("+")}`,
+        inputs: [...counts.values()],
+        outputs: [{ id: out, name: item.name, count: 1 }],
+        time: cauldronTime(item.cauldron_target!),
+        crafted_in: "cauldron",
+        steps: v.steps,
+        usualSteps: productionSteps(out),
+        buysInputs: v.bought,
+    };
+}
+
+/** Variants offered per material: the simplest few and the cheapest few; the planner picks */
+const PER_KIND = 4;
+const bySimplicity = (a: Variant, b: Variant) => a.steps - b.steps || a.distinct - b.distinct || a.price - b.price || a.off - b.off;
+const byPrice = (a: Variant, b: Variant) => a.price - b.price || a.steps - b.steps || a.off - b.off;
+
+/**
+ * Cauldron recipes for materials where the cauldron takes fewer steps than the usual
+ * route: the ones "use cauldron" switches to, a few variants each
+ */
+export function cauldronRecipesFor(options: CauldronOptions): CauldronRecipe[] {
+    mixes ??= allMixes();
+    const result: CauldronRecipe[] = [];
+    for (const [out, variants] of mixes) {
+        const usual = productionSteps(out);
+        const allowed = variants.filter((v) => v.steps < usual && (options.buyInputs || !v.bought));
+        if (allowed.length === 0) continue;
+        const picked = new Set([...[...allowed].sort(bySimplicity).slice(0, PER_KIND), ...[...allowed].sort(byPrice).slice(0, PER_KIND)]);
+        picked.forEach((v) => result.push(toRecipe(out, v)));
+    }
+    return result;
+}
+
+let everything: Map<string, CauldronRecipe> | null = null;
+/** Any cauldron recipe the planner may have used, by id */
+export function cauldronRecipeById(id: string): CauldronRecipe | undefined {
+    if (!id.startsWith("cauldron-")) return undefined;
+    everything ??= new Map([...cauldronRecipesFor({ buyInputs: true }), ...cauldronRecipesFor({ buyInputs: false })].map((r) => [r.id, r]));
+    return everything.get(id);
+}

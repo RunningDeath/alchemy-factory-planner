@@ -8,7 +8,8 @@
     "cauldron_cost": 5000,
     "cauldron_target": 16000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.3125
+    "cauldron_efficiency": 0.3125,
+    "purchasable": true
   },
   {
     "id": "advancedfertilizer",
@@ -303,7 +304,8 @@
     "cauldron_cost": 2300,
     "cauldron_target": 6000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.38333333333333336
+    "cauldron_efficiency": 0.38333333333333336,
+    "purchasable": true
   },
   {
     "id": "charcoal",
@@ -407,7 +409,8 @@
     "cauldron_cost": 37,
     "cauldron_target": 40,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.925
+    "cauldron_efficiency": 0.925,
+    "purchasable": true
   },
   {
     "id": "coke",
@@ -678,7 +681,8 @@
     "cauldron_cost": 115,
     "cauldron_target": 280,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.4107142857142857
+    "cauldron_efficiency": 0.4107142857142857,
+    "purchasable": true
   },
   {
     "id": "fruitwine",
@@ -700,7 +704,8 @@
     "cauldron_cost": 100,
     "cauldron_target": 100,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 1
+    "cauldron_efficiency": 1,
+    "purchasable": true
   },
   {
     "id": "gentian",
@@ -745,7 +750,8 @@
     "cauldron_cost": 29000,
     "cauldron_target": 64000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.453125
+    "cauldron_efficiency": 0.453125,
+    "purchasable": true
   },
   {
     "id": "glass",
@@ -936,7 +942,8 @@
     "cauldron_cost": 11,
     "cauldron_target": 12,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.9166666666666666
+    "cauldron_efficiency": 0.9166666666666666,
+    "purchasable": true
   },
   {
     "id": "ironsand",
@@ -1025,7 +1032,8 @@
     "cauldron_cost": 6000,
     "cauldron_target": 16000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.375
+    "cauldron_efficiency": 0.375,
+    "purchasable": true
   },
   {
     "id": "limestone",
@@ -1036,7 +1044,8 @@
     "cauldron_cost": 3,
     "cauldron_target": 4,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.75
+    "cauldron_efficiency": 0.75,
+    "purchasable": true
   },
   {
     "id": "limewater",
@@ -1179,7 +1188,8 @@
     "cauldron_cost": 800,
     "cauldron_target": 2000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.4
+    "cauldron_efficiency": 0.4,
+    "purchasable": true
   },
   {
     "id": "moonlitsoap",
@@ -1329,7 +1339,8 @@
     "cauldron_cost": 750,
     "cauldron_target": 1500,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.5
+    "cauldron_efficiency": 0.5,
+    "purchasable": true
   },
   {
     "id": "pottery",
@@ -1350,7 +1361,8 @@
     "cauldron_cost": 45,
     "cauldron_target": 70,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.6428571428571429
+    "cauldron_efficiency": 0.6428571428571429,
+    "purchasable": true
   },
   {
     "id": "quartzore",
@@ -1361,7 +1373,8 @@
     "cauldron_cost": 230,
     "cauldron_target": 550,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.41818181818181815
+    "cauldron_efficiency": 0.41818181818181815,
+    "purchasable": true
   },
   {
     "id": "quicklime",
@@ -1406,7 +1419,8 @@
     "cauldron_cost": 650,
     "cauldron_target": 1300,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.5
+    "cauldron_efficiency": 0.5,
+    "purchasable": true
   },
   {
     "id": "rocksalt",
@@ -1417,7 +1431,8 @@
     "cauldron_cost": 35,
     "cauldron_target": 45,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.7777777777777778
+    "cauldron_efficiency": 0.7777777777777778,
+    "purchasable": true
   },
   {
     "id": "rottenlog",
@@ -1428,7 +1443,8 @@
     "cauldron_cost": 6.5,
     "cauldron_target": 10,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.65
+    "cauldron_efficiency": 0.65,
+    "purchasable": true
   },
   {
     "id": "ruby",
@@ -1473,7 +1489,8 @@
     "cauldron_cost": 175,
     "cauldron_target": 360,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.4861111111111111
+    "cauldron_efficiency": 0.4861111111111111,
+    "purchasable": true
   },
   {
     "id": "salt",
@@ -1939,7 +1956,8 @@
     "cauldron_cost": 0.8,
     "cauldron_target": 1,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 0.8
+    "cauldron_efficiency": 0.8,
+    "purchasable": true
   },
   {
     "id": "woodacid",
@@ -2017,7 +2035,8 @@
     "cauldron_cost": 5000000,
     "cauldron_target": 5000000,
     "cauldron_coef": 0,
-    "cauldron_efficiency": 1
+    "cauldron_efficiency": 1,
+    "purchasable": true
   },
   {
     "id": "worldtreevintage",

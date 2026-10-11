@@ -90,6 +90,8 @@ export function buildEfficiencyContext(config: PlannerConfig): EfficiencyContext
     selectedFertilizer: config.selectedFertilizer,
     selfFuel: config.selfFuel ?? true,
     selfFertilizer: config.selfFertilizer ?? true,
+    useCauldron: config.useCauldron ?? false,
+    cauldronBuyInputs: config.cauldronBuyInputs ?? false,
   };
 }
 

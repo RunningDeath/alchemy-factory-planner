@@ -10,6 +10,7 @@ import { writeBlueprintFile } from "./file";
 import { baseArea, buildPos, gridArea, GRID_ROTATIONS, pivotFromPlacement } from "./grid";
 import { oodleStore } from "./oodle";
 import { cloneProperties, encodeProperties, getProp, setProp, type Property, type Value } from "./properties";
+import { gameItemName, machineSettings } from "./names";
 import { blueprintTemplate, setPath } from "./template";
 
 const LIFT_BOTTOMS = new Set(["conveyer-lift-upwards", "conveyer-lift-downwards"]);
@@ -28,7 +29,10 @@ interface Record {
     pieces?: { row: string; rot: Rotation }[];
     /** App placements this building stands for */
     uids: string[];
-    filterItem?: string;
+    /** Internal names the game stores: sorted item, recipe, nursery seed */
+    filterName?: string;
+    recipeName?: string;
+    seedName?: string;
 }
 
 export interface BlueprintBody {
@@ -51,7 +55,17 @@ function outputConnected(p: Placement, out: Side, byCell: Map<string, Placement[
 }
 
 function plainRecord(p: Placement, fp: BuildingFootprint): Record {
-    return { row: fp.row, rot: p.rot, pivot: pivotFromPlacement(fp, p), base: baseArea(fp), secondary: fp.secondary, activeIndex: 0, uids: [p.uid], filterItem: p.filterItem };
+    return {
+        row: fp.row,
+        rot: p.rot,
+        pivot: pivotFromPlacement(fp, p),
+        base: baseArea(fp),
+        secondary: fp.secondary,
+        activeIndex: 0,
+        uids: [p.uid],
+        filterName: p.filterItem ? gameItemName(p.filterItem) : undefined,
+        ...machineSettings(p, fp),
+    };
 }
 
 /**
@@ -171,7 +185,9 @@ export function placementsToBody(placements: Placement[]): BlueprintBody {
         setProp(b, "IsDepend", keys.length > 0);
         setProp(b, "DependOthers", keys.length === 0 && foundation);
         setProp(b, "DependKeys", keys);
-        setProp(b, "FilterName", r.filterItem ?? "None");
+        setProp(b, "FilterName", r.filterName ?? "None");
+        setProp(b, "RecipeName", r.recipeName ?? "None");
+        setProp(b, "SeedName", r.seedName ?? "None");
         setPath(b, ["RelativeGridGroup", "Pivot"], pivot);
         setPath(b, ["RelativeGridGroup", "GridArea"], area);
         const pkg = getProp<Property[]>(b, "building");

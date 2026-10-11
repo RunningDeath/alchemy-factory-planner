@@ -5,6 +5,7 @@ import { Device, Item, PlannerConfig, Recipe } from "../types";
 import { EfficiencyContext, EPSILON } from "./types";
 import { isAlchemyMachine } from "./efficiency";
 import { normalizeItemId, getItem as getItemById, getAllItems, getEffectiveRecipeTime } from "../item-utils";
+import { cauldronRecipeById, cauldronRecipesFor } from "../cauldron";
 
 // Pre-index data
 const itemsMap = new Map<string, Item>();
@@ -59,7 +60,7 @@ export function buildLPModel(
   const fertilizerId = ctx.selectedFertilizer ? normalizeItemId(ctx.selectedFertilizer) : null;
 
   // Build item flow coefficients for each recipe
-  allRecipes.forEach((recipe) => {
+  recipesFor(ctx).forEach((recipe) => {
     // Skip recipes that produce fuel/fertilizer if self-production is disabled
     const recipeProducesFuel = !ctx.selfFuel && recipe.outputs.some(output => {
       const outputId = output.id || normalizeItemId(output.name);
@@ -382,8 +383,21 @@ export function getAllRecipes(): Recipe[] {
 }
 
 /**
- * Find recipe by ID
+ * Find recipe by ID (generated cauldron recipes included)
  */
 export function getRecipeById(id: string): Recipe | undefined {
-  return allRecipes.find((r) => r.id === id);
+  return allRecipes.find((r) => r.id === id) ?? cauldronRecipeById(id);
+}
+
+/**
+ * Recipes the planner may use. With the cauldron on, materials the cauldron makes in
+ * fewer steps lose their usual recipes and get cauldron variants instead; the LP picks
+ * the cheapest variant.
+ */
+function recipesFor(ctx: EfficiencyContext): Recipe[] {
+  if (!ctx.useCauldron) return allRecipes;
+  const cauldron = cauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs });
+  const replaced = new Set(cauldron.map((r) => r.outputs[0].id));
+  const primary = (r: Recipe) => r.outputs[0]?.id || normalizeItemId(r.outputs[0]?.name ?? "");
+  return [...allRecipes.filter((r) => !replaced.has(primary(r))), ...cauldron];
 }

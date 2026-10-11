@@ -285,6 +285,11 @@ function transformItems(
         transformed.cauldron_coef = item.cauldronMulti;
       }
 
+      // Sold by the purchasing portal (the cauldron planner picks its inputs from these)
+      if (item.portal && (item.cost ?? 0) > 0) {
+        transformed.purchasable = true;
+      }
+
       // Calculate cauldron efficiency
       if (transformed.cauldron_cost && transformed.cauldron_target) {
         transformed.cauldron_efficiency = transformed.cauldron_cost / transformed.cauldron_target;

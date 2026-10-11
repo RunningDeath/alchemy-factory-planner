@@ -225,3 +225,30 @@ describe("layout → blueprint", () => {
         expect(randomBlueprintId()).toMatch(/^[A-Za-z0-9_-]{22}$/);
     });
 });
+
+describe("machine settings", () => {
+    const settingsOf = (placements: Placement[]) => {
+        const bp = readBlueprint(exportBlueprint(placements, { title: "settings", description: "" }, PNG_1PX).bytes);
+        return buildingsOf(bp.body).map((b) => ({
+            name: getProp<string>(getProp<Property[]>(b, "building"), "BuildingName"),
+            recipe: getProp<string>(b, "RecipeName"),
+            seed: getProp<string>(b, "SeedName"),
+            filter: getProp<string>(b, "FilterName"),
+        }));
+    };
+
+    test("machines where the player picks the recipe get it, nurseries their seed, filters the internal item name", () => {
+        const placements: Placement[] = [
+            { uid: "p", id: "processor", x: 0, y: 0, z: 0, rot: 0, nodeKey: "linenthread-prod-linen-thread" },
+            { uid: "g", id: "grinder", x: 6, y: 0, z: 0, rot: 0, nodeKey: "flaxfiber-prod-flax-fiber" },
+            { uid: "n", id: "nursery", x: 0, y: 6, z: 0, rot: 0, nodeKey: "sage-prod-sage" },
+            { uid: "f", id: "filter-vert", x: 8, y: 6, z: 0, rot: 0, filterItem: "Flax Fiber" },
+        ];
+        const byName = new Map(settingsOf(placements).map((s) => [s.name, s]));
+        expect(byName.get("Processor")).toMatchObject({ recipe: "LinenThread", seed: "None" });
+        // Grinders pick their recipe from the input, like in player blueprints
+        expect(byName.get("Grinder")).toMatchObject({ recipe: "None" });
+        expect(byName.get("AutoNursery")).toMatchObject({ recipe: "None", seed: "SageSeed" });
+        expect(byName.get("Filter_Vert")).toMatchObject({ filter: "FlaxFiber" });
+    });
+});

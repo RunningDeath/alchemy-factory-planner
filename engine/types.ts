@@ -35,6 +35,8 @@ export interface Item {
   cauldron_target?: number;
   cauldron_coef?: number;
   cauldron_efficiency?: number;
+  /** Sold by the purchasing portal */
+  purchasable?: boolean;
   price?: number; // Sell price
   nutrient_value?: number; // For fertilizers
   nutrients_per_seconds?: number;
@@ -120,6 +122,10 @@ export interface PlannerConfig {
   selfFertilizer?: boolean; // If true, fertilizer is produced internally; if false, treated as external input
   planParallelLines?: boolean; // Plan parallel belt lines for flows over the belt limit (default true)
   machineRounding?: RoundingMode; // Whole machines at full speed: round up/down, or exact fractions (default "up")
+  /** Make materials in the cauldron where that takes fewer steps than their usual chain */
+  useCauldron?: boolean;
+  /** Cauldron inputs may be bought at the purchasing portal (else they are made in the factory) */
+  cauldronBuyInputs?: boolean;
 }
 
 export interface ResearchState {

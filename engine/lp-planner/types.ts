@@ -10,6 +10,8 @@ export interface EfficiencyContext {
   selectedFertilizer?: string;
   selfFuel: boolean;
   selfFertilizer: boolean;
+  useCauldron: boolean;
+  cauldronBuyInputs: boolean;
 }
 
 export interface LPSolution {
