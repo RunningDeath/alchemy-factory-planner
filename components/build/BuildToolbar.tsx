@@ -78,6 +78,10 @@ export function BuildToolbar(props: BuildToolbarProps) {
                 <input type="checkbox" checked={!!options.useBridges} onChange={(e) => onOptionsChange({ ...options, useBridges: e.target.checked })} className="accent-[var(--accent-gold)]" />
                 Bridges
             </label>
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Put small blocks on top of others (on beam decks and wood block columns) to save floor space">
+                <input type="checkbox" checked={options.stackBlocks !== false} onChange={(e) => onOptionsChange({ ...options, stackBlocks: e.target.checked })} className="accent-[var(--accent-gold)]" />
+                Stack blocks
+            </label>
             <UnlocksMenu unlocks={props.unlocks} onChange={props.onUnlocksChange} buttonClass={buttonClass} />
 
             <span className="w-px h-6 bg-[var(--border)] mx-1" />

@@ -95,6 +95,8 @@ const BELT_LAYERS = 3; // bottom + middle
 const MAX_EXPANSIONS = 200_000;
 /** A lift costs as much as 8 belt cells: fewer lifts, but no long detours around blocks either */
 const LIFT_COST = 8;
+/** Per support cell under a raised belt or lift: tall columns turn into walls, so stay low and lift late */
+const SUPPORT_WEIGHT = 1.5;
 
 /** Rotation that turns a piece's port on \`base\` to face \`want\` */
 function rotFor(base: Side, want: Side): Rotation {
@@ -341,10 +343,11 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         return beltPieceFor(ins, outs) !== null;
     };
 
-    function search(starts: Start[], goal: (cell: Cell, heading: Side) => Goal | null, estimate: (c: Cell) => number): { end: SearchNode; goal: Goal } | null {
+    /** `levels`: heights a lift may go to (the ground, the starts and the goals of this connection) */
+    function search(starts: Start[], goal: (cell: Cell, heading: Side) => Goal | null, estimate: (c: Cell) => number, levels: number[]): { end: SearchNode; goal: Goal } | null {
         const open = new Heap();
         const best = new Map<string, number>();
-        const h = (c: Cell) => estimate(c) * 1.15;
+        const h = (c: Cell) => estimate(c) * 1.5;
         const supportMemo = new Map<string, number | null>();
         const supports = (c: Cell) => {
             const k = keyOf(c);
@@ -362,7 +365,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                 return (occupancy.get(keyOf(n)) ?? []).some((o) => o.id.startsWith("belt"));
             });
             const outward = (Math.abs(c[0] - centerX) + Math.abs(c[1] - centerY)) * 0.03;
-            return 1 + (turned ? 0.3 : 0) + s * 0.8 + c[2] * 0.3 - (besideBelt ? 0.35 : 0) + outward;
+            return 1 + (turned ? 0.3 : 0) + s * SUPPORT_WEIGHT + c[2] * 0.3 - (besideBelt ? 0.35 : 0) + outward;
         };
 
         for (const s of starts) {
@@ -430,7 +433,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
 
             // Lift up or down from the next cell
             if (options.lifts !== false && liftFree(n) && cur.step.kind === "belt") {
-                for (const z2 of liftLevels) {
+                for (const z2 of levels) {
                     if (z2 === n[2]) continue;
                     const lo = Math.min(z2, n[2]);
                     const hi = Math.max(z2, n[2]);
@@ -441,7 +444,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                     if (support === null) continue;
                     const top: Cell = [n[0], n[1], z2];
                     for (const heading of SIDES) {
-                        const cost = LIFT_COST + (hi - lo) * 1.5 + support * 0.6;
+                        const cost = LIFT_COST + (hi - lo) * 1.5 + support * SUPPORT_WEIGHT;
                         const node: SearchNode = { cell: top, heading, g: cur.g + cost, f: 0, parent: cur, step: { kind: "lift", entry: n, exitZ: z2, inSide, outSide: heading } };
                         node.f = node.g + h(top);
                         const k = `${keyOf(top)}:${heading}`;
@@ -711,7 +714,12 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             if (conn.from === "import") tree = `import:${conn.itemName}:${io.length}`;
         }
 
-        const found = search(starts, goal, estimate);
+        // Lifts only go where this connection starts or ends: fewer branches in tall modules
+        const goalZs = conn.to === "export"
+            ? [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}`).map((n) => n.cell[2])
+            : [conn.to.port[2], ...[...nodes.values()].filter((n) => conn.to !== "export" && n.sinks.has(conn.to.uid)).map((n) => n.cell[2])];
+        const levels = [...new Set([0, 1, ...starts.map((st) => st.cell[2]), ...goalZs])].filter((z) => liftLevels.includes(z) || z <= 1).sort((a, b) => a - b);
+        const found = search(starts, goal, estimate, levels);
         let ok = false;
         if (found) {
             const startNode = (() => {

@@ -1,0 +1,257 @@
+/**
+ * Block towers: small blocks go on top of other blocks instead of next to them, so a
+ * module uses the storey's height rather than floor space. The upper block rests on
+ * wood block and lab stand columns down to whatever is below (machine tops that take a
+ * load, or the ground); lab stands let lane belts underneath keep running.
+ */
+import { cellKey, cellsCollide, placementCells, type Placement } from "./layout";
+import { addToOccupancy, isSupported, supportColumn, type Occupancy } from "./supports";
+
+export interface TowerMember {
+    /** Block index */
+    index: number;
+    /** Where the block sits in the tower's frame */
+    dx: number;
+    dy: number;
+    dz: number;
+}
+
+export interface Tower {
+    members: TowerMember[];
+    /** Every member's placements in the tower's frame, plus the columns under upper blocks */
+    placements: Placement[];
+    width: number;
+    depth: number;
+}
+
+export interface TowerBlock {
+    placements: Placement[];
+    width: number;
+    depth: number;
+    /** Heated blocks need their platform on the ground */
+    canGoUp: boolean;
+}
+
+interface TowerOptions {
+    maxHeight: number;
+    /** Blocks that exchange items: stacking them keeps belts short */
+    related: (a: number, b: number) => boolean;
+    makeUid: () => string;
+}
+
+/** Upper block must save at least this share of its own floor */
+const MIN_SAVING = 0.3;
+/** Score per support column cell (wood is cheap, but a forest of columns isn't) */
+const SUPPORT_COST = 0.3;
+const RELATED_BONUS = 6;
+/** Per level up: high blocks mean long lifts and belts on tall columns */
+const HEIGHT_COST = 2;
+/** A lane end with no free shaft to the ground beside it means belts running high to the tower's edge */
+const BURIED_END_COST = 10;
+
+/** Lane ends of the upper block without a free column to the ground next to them */
+function buriedEnds(tower: Tower, fit: Fit): number {
+    const occupied = new Set<string>();
+    for (const p of [...tower.placements, ...fit.moved, ...fit.supports]) for (const c of placementCells(p)) occupied.add(`${c.x},${c.y},${c.z}`);
+    const shaftFree = (x: number, y: number, z: number) => {
+        for (let k = 0; k <= z; k++) if (occupied.has(`${x},${y},${k}`)) return false;
+        return true;
+    };
+    return fit.moved
+        .filter((p) => p.laneEnd)
+        .filter((p) => ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => shaftFree(p.x + ox, p.y + oy, p.z)))
+        .length;
+}
+
+const shift = (ps: Placement[], dx: number, dy: number, dz: number) => ps.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy, z: p.z + dz }));
+
+function occupancyOf(placements: Placement[]): Occupancy {
+    const occupancy: Occupancy = new Map();
+    placements.forEach((p) => addToOccupancy(occupancy, p));
+    return occupancy;
+}
+
+/** Height of the tower's top per ground cell (one above its highest cell) */
+function topMap(placements: Placement[]): Map<string, number> {
+    const top = new Map<string, number>();
+    for (const p of placements)
+        for (const c of placementCells(p)) {
+            const key = `${c.x},${c.y}`;
+            top.set(key, Math.max(top.get(key) ?? 0, c.z + 1));
+        }
+    return top;
+}
+
+/** Wooden beams, longest first; they only need support at both ends */
+const DECK_BEAMS: [number, string][] = [
+    [5, "beam5"],
+    [3, "beam3"],
+];
+
+interface Fit {
+    dz: number;
+    moved: Placement[];
+    supports: Placement[];
+}
+
+function fits(occupancy: Occupancy, p: Placement): boolean {
+    return placementCells(p).every((c) => (occupancy.get(cellKey(c.x, c.y, c.z)) ?? []).every((o) => !cellsCollide(c, o)));
+}
+
+/** A column of supports under (x, y, z) that reaches the ground or something carrying it, added to the occupancy */
+function carry(occupancy: Occupancy, x: number, y: number, z: number, makeUid: () => string): Placement[] | null {
+    if (isSupported(occupancy, x, y, z)) return [];
+    const column = supportColumn(occupancy, x, y, z, 0, makeUid);
+    const lowest = column.length ? column[column.length - 1].z : z;
+    return isSupported(occupancy, x, y, lowest) ? column : null;
+}
+
+/** Upper block placed `dz` up, standing on columns only */
+function onColumns(tower: Tower, moved: Placement[], dz: number, opts: TowerOptions): Fit | null {
+    const occupancy = occupancyOf(tower.placements);
+    moved.forEach((p) => addToOccupancy(occupancy, p));
+    const supports: Placement[] = [];
+    for (const c of moved.flatMap(placementCells).filter((c) => c.z === dz && c.foundation)) {
+        const column = carry(occupancy, c.x, c.y, c.z, opts.makeUid);
+        if (!column) return null;
+        supports.push(...column);
+    }
+    return { dz, moved, supports };
+}
+
+/**
+ * Upper block on a deck of beams one level up: most machines can't carry a load, so the
+ * beams span across them and rest on columns at their ends (lanes, gaps, the ground)
+ */
+function onDeck(tower: Tower, moved: Placement[], dz: number, axis: "x" | "y", opts: TowerOptions): Fit | null {
+    const deckZ = dz - 1;
+    const occupancy = occupancyOf(tower.placements);
+    moved.forEach((p) => addToOccupancy(occupancy, p));
+    const supports: Placement[] = [];
+    const needed = moved.flatMap(placementCells).filter((c) => c.z === dz && c.foundation);
+    const lineOf = (c: { x: number; y: number }) => (axis === "x" ? c.y : c.x);
+    const posOf = (c: { x: number; y: number }) => (axis === "x" ? c.x : c.y);
+    const lines = new Map<number, number[]>();
+    for (const c of needed) lines.set(lineOf(c), [...(lines.get(lineOf(c)) ?? []), posOf(c)]);
+    const at = (line: number, pos: number) => (axis === "x" ? { x: pos, y: line } : { x: line, y: pos });
+
+    for (const [line, list] of lines) {
+        const todo = [...new Set(list)].sort((p, q) => p - q);
+        while (todo.length) {
+            const first = todo[0];
+            let placed: Placement[] | null = null;
+            for (const [length, id] of DECK_BEAMS) {
+                // Start so the beam covers the first open cell, as many others as it can
+                for (let start = first; start > first - length && !placed; start--) {
+                    const origin = at(line, start);
+                    const beam: Placement = { uid: opts.makeUid(), id, x: origin.x, y: origin.y, z: deckZ, rot: axis === "x" ? 1 : 0 };
+                    const cells = placementCells(beam);
+                    if (!fits(occupancy, beam) || !cells.some((c) => posOf(c) === first && lineOf(c) === line)) continue;
+                    const trial = new Map([...occupancy].map(([k, v]) => [k, [...v]]));
+                    addToOccupancy(trial, beam);
+                    const ends = cells.filter((c) => c.foundation);
+                    const columns = ends.map((c) => carry(trial, c.x, c.y, c.z, opts.makeUid));
+                    if (columns.some((col) => !col)) continue;
+                    placed = [beam, ...columns.flatMap((col) => col!)];
+                    trial.forEach((v, k) => occupancy.set(k, v));
+                    const covered = new Set(cells.map(posOf));
+                    for (let i = todo.length - 1; i >= 0; i--) if (covered.has(todo[i])) todo.splice(i, 1);
+                }
+                if (placed) break;
+            }
+            if (!placed) return null;
+            supports.push(...placed);
+        }
+    }
+    return { dz, moved, supports };
+}
+
+/** Puts `upper` on `tower` at (dx, dy): the columns and beams it needs, or null when it can't stand there */
+function mount(tower: Tower, top: Map<string, number>, upper: TowerBlock, dx: number, dy: number, opts: TowerOptions): Fit | null {
+    const cells = upper.placements.flatMap(placementCells);
+    // Lowest height where every cell of the upper block clears the tower
+    let dz = 0;
+    for (const c of cells) dz = Math.max(dz, (top.get(`${c.x + dx},${c.y + dy}`) ?? 0) - c.z);
+    // Nothing under it: that's placing it beside, the packer's job
+    if (dz === 0) return null;
+    const height = Math.max(...cells.map((c) => c.z)) + 1;
+    if (dz + height > opts.maxHeight) return null;
+    const direct = onColumns(tower, shift(upper.placements, dx, dy, dz), dz, opts);
+    if (direct) return direct;
+    if (dz + 1 + height > opts.maxHeight) return null;
+    const raised = shift(upper.placements, dx, dy, dz + 1);
+    // Beams the way that needs the fewest supports
+    const decks = [onDeck(tower, raised, dz + 1, "x", opts), onDeck(tower, raised, dz + 1, "y", opts)].filter((d): d is Fit => !!d);
+    return decks.sort((a, b) => a.supports.length - b.supports.length)[0] ?? null;
+}
+
+function bounds(placements: Placement[]) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of placements)
+        for (const c of placementCells(p)) {
+            minX = Math.min(minX, c.x);
+            minY = Math.min(minY, c.y);
+            maxX = Math.max(maxX, c.x);
+            maxY = Math.max(maxY, c.y);
+        }
+    return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Groups blocks into towers. Small blocks first look for a tower they fit on; a block
+ * that already carries another stays a base.
+ */
+export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
+    const towers: (Tower | null)[] = blocks.map((b, index) => ({
+        members: [{ index, dx: 0, dy: 0, dz: 0 }],
+        placements: b.placements,
+        width: b.width,
+        depth: b.depth,
+    }));
+    const order = blocks.map((_, i) => i).sort((a, b) => blocks[a].width * blocks[a].depth - blocks[b].width * blocks[b].depth);
+
+    for (const i of order) {
+        const upper = blocks[i];
+        const own = towers[i];
+        if (!upper.canGoUp || !own || own.members.length > 1) continue;
+        const area = upper.width * upper.depth;
+        let best: { t: number; dx: number; dy: number; score: number; fit: NonNullable<ReturnType<typeof mount>> } | null = null;
+
+        for (let t = 0; t < towers.length; t++) {
+            const tower = towers[t];
+            if (!tower || t === i) continue;
+            const top = topMap(tower.placements);
+            const related = tower.members.some((m) => opts.related(m.index, i));
+            const xs = [Math.min(0, tower.width - upper.width), Math.max(0, tower.width - upper.width)];
+            const ys = [Math.min(0, tower.depth - upper.depth), Math.max(0, tower.depth - upper.depth)];
+            for (let dx = xs[0]; dx <= xs[1]; dx++)
+                for (let dy = ys[0]; dy <= ys[1]; dy++) {
+                    const fit = mount(tower, top, upper, dx, dy, opts);
+                    if (!fit) continue;
+                    const width = Math.max(tower.width, dx + upper.width) - Math.min(0, dx);
+                    const depth = Math.max(tower.depth, dy + upper.depth) - Math.min(0, dy);
+                    const saved = tower.width * tower.depth + area - width * depth;
+                    if (saved < area * MIN_SAVING) continue;
+                    const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST - buriedEnds(tower, fit) * BURIED_END_COST;
+                    if (!best || score > best.score) best = { t, dx, dy, score, fit };
+                }
+        }
+        if (!best) continue;
+        const { t, dx, dy, fit } = best;
+        const tower = towers[t]!;
+        const all = [...tower.placements, ...fit.moved, ...fit.supports];
+        const members = [...tower.members, { index: i, dx, dy, dz: fit.dz }];
+        // Keep the tower's frame at 0,0
+        const b = bounds(all);
+        const ox = Math.min(0, b.minX), oy = Math.min(0, b.minY);
+        towers[t] = {
+            members: members.map((m) => ({ ...m, dx: m.dx - ox, dy: m.dy - oy })),
+            placements: shift(all, -ox, -oy, 0),
+            width: Math.max(tower.width, dx + upper.width) - ox,
+            depth: Math.max(tower.depth, dy + upper.depth) - oy,
+        };
+        towers[i] = null;
+    }
+    return towers.filter((t): t is Tower => t !== null);
+}
+

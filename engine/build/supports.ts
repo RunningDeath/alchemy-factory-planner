@@ -2,6 +2,7 @@
  * Supports under raised belts and beams: lab stands (they share a cell with a belt)
  * or wood blocks, stacked down to the ground or the first stackable cell.
  */
+import { canSupport, getFootprint } from "./footprint";
 import { cellKey, cellsCollide, placementCells, type Placement, type WorldCell } from "./layout";
 
 const FRAME_ID = "frame-single";
@@ -18,10 +19,10 @@ export function addToOccupancy(occupancy: Occupancy, p: Placement): void {
     }
 }
 
-/** Something under (x, y, z) a belt or support can stand on */
+/** Something under (x, y, z) a belt or support can stand on (most machines can't carry a load) */
 export function isSupported(occupancy: Occupancy, x: number, y: number, z: number, groundZ = 0): boolean {
     if (z <= groundZ) return true;
-    return (occupancy.get(cellKey(x, y, z - 1)) ?? []).some((c) => c.stackable && c.quads === 15);
+    return (occupancy.get(cellKey(x, y, z - 1)) ?? []).some((c) => c.stackable && c.quads === 15 && canSupport(getFootprint(c.id)!));
 }
 
 function fits(occupancy: Occupancy, p: Placement): boolean {
@@ -180,6 +181,22 @@ export function beamsUnderRuns(placements: Placement[], makeUid: () => string): 
         }
     }
     return current;
+}
+
+/**
+ * Removes supports nothing stands on any more (left over after belts were re-routed or
+ * blocks moved), top down so whole columns go.
+ */
+export function pruneSupports(placements: Placement[]): Placement[] {
+    let current = placements;
+    for (;;) {
+        const carried = new Set<string>();
+        for (const p of current)
+            for (const c of placementCells(p)) if (c.foundation) carried.add(cellKey(c.x, c.y, c.z - 1));
+        const next = current.filter((p) => !SUPPORT_IDS.has(p.id) || carried.has(cellKey(p.x, p.y, p.z)));
+        if (next.length === current.length) return current;
+        current = next;
+    }
 }
 
 /**

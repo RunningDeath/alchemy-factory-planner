@@ -23,7 +23,8 @@
 import { beltPieceFor } from "./belt-pieces";
 import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, type Rotation } from "./footprint";
 import { buildOccupancy, placementPorts, type Placement } from "./layout";
-import { preferBlocks, supportColumn, beamsUnderRuns } from "./supports";
+import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
+import { buildTowers, type Tower } from "./towers";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
 import deviceMetadata from "../../data/device-metadata.json";
 import { flowRows, nearFeeders, packBlocks, transformBlock } from "./packing";
@@ -74,6 +75,8 @@ export interface ModuleOptions {
     keepItems?: string[];
     /** The player's level and unlocks; only those buildings are used. Absent: everything */
     unlocks?: BuildUnlocks;
+    /** Put small blocks on top of others to save floor (default: yes) */
+    stackBlocks?: boolean;
 }
 
 /** One storey: walls and pillars are 16 cells high */
@@ -933,27 +936,60 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         ...CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"]]),
         [CORRIDORS[CORRIDORS.length - 1], "packed"],
     ];
-    for (const [corridor, mode] of attempts) {
-        const result = layOut(blocks, flow, corridor, mode, options, can);
-        if (!best || score(result) < score(best)) best = result;
-        // Both layouts of a corridor width get a chance before settling
-        if (mode === "flow" && best.routes.every((r) => r.ok)) break;
+    const singles: Tower[] = blocks.map((b, index) => ({ members: [{ index, dx: 0, dy: 0, dz: 0 }], placements: b.placements, width: b.info.width, depth: b.info.depth }));
+    const related = (a: number, b: number) => flow[a].feeders.includes(b) || flow[b].feeders.includes(a);
+    const towers =
+        options.stackBlocks === false || !can.lifts
+            ? singles
+            : buildTowers(
+                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating })),
+                  { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
+              );
+    // Stacked towers first; side by side only when the towers can't be belted together
+    const layouts = towers.length < singles.length ? [towers, singles] : [singles];
+    for (const set of layouts) {
+        const setFlow = towerFlow(set, flow);
+        for (const [corridor, mode] of attempts) {
+            const result = layOut(blocks, set, setFlow, corridor, mode, options, can);
+            if (!best || score(result) < score(best)) best = result;
+            // Both layouts of a corridor width get a chance before settling
+            if (mode === "flow" && best.routes.every((r) => r.ok)) break;
+        }
+        if (best?.routes.every((r) => r.ok)) break;
     }
     best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
     return best!;
 }
 
-/** Places the blocks with free corridors between them and belts them together */
+type BlockFlow = { stage: number; feeders: number[]; feederWeights: number[] };
+
+/** Flow between towers: a tower is as early as its earliest block and fed by its blocks' feeders */
+function towerFlow(towers: Tower[], flow: BlockFlow[]): BlockFlow[] {
+    const towerOf = new Map<number, number>();
+    towers.forEach((t, ti) => t.members.forEach((m) => towerOf.set(m.index, ti)));
+    return towers.map((t, ti) => {
+        const weights = new Map<number, number>();
+        for (const m of t.members)
+            flow[m.index].feeders.forEach((f, k) => {
+                const from = towerOf.get(f)!;
+                if (from !== ti) weights.set(from, (weights.get(from) ?? 0) + flow[m.index].feederWeights[k]);
+            });
+        return { stage: Math.min(...t.members.map((m) => flow[m.index].stage)), feeders: [...weights.keys()], feederWeights: [...weights.values()] };
+    });
+}
+
+/** Places the towers with free corridors between them and belts them together */
 function layOut(
     blocks: { placements: Placement[]; info: TierInfo }[],
-    flow: { stage: number; feeders: number[]; feederWeights: number[] }[],
+    towers: Tower[],
+    flow: BlockFlow[],
     corridor: number,
     mode: LayoutMode,
     options: ModuleOptions,
     can: Capabilities,
 ): GeneratedModule {
     const pad = corridor * 2;
-    const sizes = blocks.map((b) => ({ width: b.info.width + pad, depth: b.info.depth + pad }));
+    const sizes = towers.map((t) => ({ width: t.width + pad, depth: t.depth + pad }));
     const packed =
         mode === "near"
             ? nearFeeders(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad)
@@ -961,19 +997,27 @@ function layOut(
               ? flowRows(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad, 0, 1)
               : packBlocks(sizes, options.maxWidth + pad);
     const blockPlacements: Placement[] = [];
-    const tiers = blocks.map((b, i) => {
-        const pos = packed.positions[i];
-        const padded = b.placements.map((p) => ({ ...p, x: p.x + corridor, y: p.y + corridor }));
-        blockPlacements.push(...transformBlock(padded, b.info.depth + pad, pos.rot, pos.x, pos.y));
+    const tiers: TierInfo[] = new Array(blocks.length);
+    towers.forEach((tower, ti) => {
+        const pos = packed.positions[ti];
+        const padded = tower.placements.map((p) => ({ ...p, x: p.x + corridor, y: p.y + corridor }));
+        const towerDepth = tower.depth + pad;
+        blockPlacements.push(...transformBlock(padded, towerDepth, pos.rot, pos.x, pos.y));
         const turned = pos.rot === 1;
-        return {
-            ...b.info,
-            x: pos.x + corridor,
-            y: pos.y + corridor,
-            width: turned ? b.info.depth : b.info.width,
-            depth: turned ? b.info.width : b.info.depth,
-            turned,
-        };
+        for (const m of tower.members) {
+            const info = blocks[m.index].info;
+            const x0 = m.dx + corridor;
+            const y0 = m.dy + corridor;
+            tiers[m.index] = {
+                ...info,
+                x: turned ? towerDepth - (y0 + info.depth) + pos.x : x0 + pos.x,
+                y: turned ? x0 + pos.y : y0 + pos.y,
+                z: info.z + m.dz,
+                width: turned ? info.depth : info.width,
+                depth: turned ? info.width : info.depth,
+                turned,
+            };
+        }
     });
 
     // Belt the blocks to each other, to the imports and to the exports
@@ -993,8 +1037,8 @@ function layOut(
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
     // beams instead of pillars under longer raised belt runs
     // (lab stands a belt passes through stay; without that unlock they show up as locked)
-    const blocked = preferBlocks(routed.placements);
-    routed.placements = can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked;
+    const blocked = preferBlocks(pruneSupports(routed.placements));
+    routed.placements = pruneSupports(can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked);
 
     const cells = routed.placements.map((p) => {
         const fp = getFootprint(p.id);

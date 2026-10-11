@@ -71,7 +71,8 @@ export function BuildPlanner() {
     const uidCounter = useRef(0);
     const makeUid = useCallback(() => `p${Date.now().toString(36)}-${++uidCounter.current}`, []);
 
-    const steps = useMemo(() => (report ? stepsFromReport(report) : []), [report]);
+    const fuel = factory?.config.selectedFuel;
+    const steps = useMemo(() => (report ? stepsFromReport(report, fuel) : []), [report, fuel]);
     const stepIndex = useMemo(() => new Map(steps.map((s, i) => [s.nodeKey, i])), [steps]);
     const [highlightItem, setHighlightItem] = useState<string | null>(null);
     const [exporting, setExporting] = useState(false);

@@ -616,7 +616,12 @@ function linkProductionNodes(
             // Calculate consumption rate from this production source, scaled by production portion
             const inputRate = fuelRate * (sourceRate / fuelFlow.produced) * prodPortion;
 
-            if (!sourceNode || sourceNodeId === nodeId || nodeInputs.has(sourceNodeId)) return;
+            if (!sourceNode || sourceNodeId === nodeId) return;
+            // Already linked as a recipe input (e.g. planks burnt while making charcoal): same edge, more flow
+            if (nodeInputs.has(sourceNodeId)) {
+              addToExistingInput(node, sourceNodeId, inputRate);
+              return;
+            }
 
             // Check for cycles - if detected, still create the link but don't add to dependencies
             // This allows the graph to show circular fuel flows without breaking traversal
@@ -637,7 +642,7 @@ function linkProductionNodes(
         // This allows showing both produced AND raw sources when both exist
         const rawNodeId = `${fuelId}-raw`;
         const rawNode = nodes.get(rawNodeId);
-        if (rawNode && !nodeInputs.has(rawNodeId)) {
+        if (rawNode) {
           // Calculate how much raw fuel this node consumes
           // If there's also production, the raw portion is proportional to raw supply
           const rawFuelRate = rawNode.rate;
@@ -645,6 +650,10 @@ function linkProductionNodes(
           const rawPortion = totalFuelAvailable > 0 ? rawFuelRate / totalFuelAvailable : 1;
           const rawInputRate = fuelRate * rawPortion;
 
+          if (nodeInputs.has(rawNodeId)) {
+            addToExistingInput(node, rawNodeId, rawInputRate);
+            return;
+          }
           nodeInputs.add(rawNodeId);
           node.inputs.push(createInputReference(rawNode, rawInputRate, fuelId));
           addDependency(nodeId, rawNodeId);
@@ -652,6 +661,22 @@ function linkProductionNodes(
       }
     }
   });
+}
+
+/**
+ * Adds flow to an input the node already has (fuel that is also a recipe input).
+ * Shared producer nodes carry the rate in inputRates; raw and consumption references in their own copy.
+ */
+function addToExistingInput(node: ProductionNode, sourceId: string, rate: number): void {
+  if (node.inputRates?.[sourceId] !== undefined) {
+    node.inputRates = { ...node.inputRates, [sourceId]: node.inputRates[sourceId] + rate };
+    return;
+  }
+  const index = node.inputs.findIndex((i) => i.id === sourceId);
+  if (index < 0) return;
+  const existing = node.inputs[index];
+  if (existing.isRaw || existing.isConsumptionReference) node.inputs[index] = { ...existing, rate: existing.rate + rate };
+  else node.inputRates = { ...node.inputRates, [sourceId]: existing.rate + rate };
 }
 
 /**
