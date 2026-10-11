@@ -72,7 +72,8 @@ export function LayerGrid({
     onHoverCell,
 }: LayerGridProps) {
     const [hover, setHover] = useState<[number, number] | null>(null);
-    const [dragStart, setDragStart] = useState<[number, number] | null>(null);
+    /** Cells the mouse passed over while drawing a belt, in order */
+    const [dragPath, setDragPath] = useState<[number, number][] | null>(null);
 
     // Grid extent: everything placed plus a margin, at least MIN_EXTENT cells
     const extent = useMemo(() => {
@@ -124,8 +125,8 @@ export function LayerGrid({
     const preview = useMemo(() => {
         if (!tool || !hover) return null;
         let pending: Placement[];
-        if (isBeltPiece(tool.id) && dragStart && (dragStart[0] !== hover[0] || dragStart[1] !== hover[1])) {
-            pending = beltPath(lPath(dragStart, hover), level, makeUid);
+        if (isBeltPiece(tool.id) && dragPath && dragPath.length >= 2) {
+            pending = beltPath(dragPath, level, makeUid);
         } else {
             pending = [{ uid: "preview", id: tool.id, x: hover[0], y: hover[1], z: level, rot: tool.rot, nodeKey: tool.nodeKey, label: tool.label }];
         }
@@ -133,7 +134,7 @@ export function LayerGrid({
             placementIssues(p, occupancy).every((i) => i.kind !== "collision" || isBeltPiece(p.id)),
         );
         return { pending, valid };
-    }, [tool, hover, dragStart, level, occupancy, makeUid]);
+    }, [tool, hover, dragPath, level, occupancy, makeUid]);
 
     const cellFromEvent = (e: React.MouseEvent<SVGSVGElement>): [number, number] => {
         const rect = e.currentTarget.getBoundingClientRect();
@@ -143,7 +144,22 @@ export function LayerGrid({
     const handleDown = (e: React.MouseEvent<SVGSVGElement>) => {
         if (e.button !== 0) return;
         const cell = cellFromEvent(e);
-        if (tool && isBeltPiece(tool.id)) setDragStart(cell);
+        if (tool && isBeltPiece(tool.id)) setDragPath([cell]);
+    };
+
+    /** Follow the mouse: add the cells it passes, fill skipped ones, step back when it returns */
+    const extendPath = (cell: [number, number]) => {
+        setDragPath((path) => {
+            if (!path) return path;
+            const same = (a: [number, number], b: [number, number]) => a[0] === b[0] && a[1] === b[1];
+            const last = path[path.length - 1];
+            if (same(last, cell)) return path;
+            const seen = path.findIndex((c) => same(c, cell));
+            // Back onto the drawn path: cut it there (undo the last stretch)
+            if (seen >= 0) return path.slice(0, seen + 1);
+            const gap = Math.abs(cell[0] - last[0]) + Math.abs(cell[1] - last[1]);
+            return gap === 1 ? [...path, cell] : [...path, ...lPath(last, cell).slice(1)];
+        });
     };
 
     const handleUp = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -154,7 +170,7 @@ export function LayerGrid({
             return;
         }
         if (preview) onPlace(preview.pending.map((p) => (p.uid === "preview" ? { ...p, uid: makeUid() } : p)));
-        setDragStart(null);
+        setDragPath(null);
     };
 
     const width = extent.width * cs;
@@ -192,12 +208,13 @@ export function LayerGrid({
                 if (!hover || hover[0] !== cell[0] || hover[1] !== cell[1]) {
                     setHover(cell);
                     onHoverCell?.(cell);
+                    if (dragPath) extendPath(cell);
                 }
             }}
             onMouseLeave={() => {
                 setHover(null);
                 onHoverCell?.(null);
-                setDragStart(null);
+                setDragPath(null);
             }}
             onMouseDown={handleDown}
             onMouseUp={handleUp}

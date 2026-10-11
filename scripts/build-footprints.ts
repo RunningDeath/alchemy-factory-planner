@@ -74,7 +74,18 @@ const PORT_SIDES: [keyof RawPort & ('Left' | 'Right' | 'Up' | 'Bottom'), Side][]
 ];
 
 /** Rows not useful for factory modules: rails, elevators, expandable pieces, launchers, payload actors */
-const EXCLUDED_ROWS = /^(Railroad|Track|Elevator|Expandable|Catapult|Cannon|SmartCannon|DrawBridge|CrossTunnel|ConveyerLift_Payload|BounceShroom|PhantomTempBag|SpawnTrain|KnowledgeAltar)/;
+const EXCLUDED_ROWS = /^(Railroad|Track|Elevator|Expandable|Catapult|Cannon|SmartCannon|DrawBridgeR|CrossTunnel|ConveyerLift_Payload|BounceShroom|PhantomTempBag|SpawnTrain|KnowledgeAltar)/;
+
+/**
+ * The drawbridge conveyor lists both ports on its anchor cell. It carries items across
+ * its unsupported deck, so items enter at the anchor and leave at the far end of the deck.
+ */
+const PORT_OVERRIDES: Record<string, (raw: RawBuilding) => FootprintPort[]> = {
+  DrawBridge: () => [
+    { x: 0, y: 0, z: 0, face: "down", dir: "in", medium: "belt" },
+    { x: 0, y: -3, z: 0, face: "up", dir: "out", medium: "belt" },
+  ],
+};
 
 export function categoryFor(row: string, raw: RawBuilding): BuildingCategory | null {
   const tags = raw.BuildingTags.join(',');
@@ -132,7 +143,7 @@ export function toFootprint(row: string, raw: RawBuilding, english: Record<strin
   ];
   if (boxes.length === 0) return null;
 
-  let ports = raw.InOutList.flatMap(portsFrom);
+  let ports = PORT_OVERRIDES[row]?.(raw) ?? raw.InOutList.flatMap(portsFrom);
 
   // Normalize so the bounding box starts at 0,0,0 (a few buildings use negative offsets)
   const offset = [0, 1, 2].map((i) => Math.min(...boxes.map((b) => b.min[i])));

@@ -68,7 +68,11 @@ export function BuildToolbar(props: BuildToolbarProps) {
             <NumberField label="Max W" value={options.maxWidth} min={4} max={64} title="Module width in cells; blocks wrap into a new row past this (a wooden floor is 16)" onChange={(maxWidth) => onOptionsChange({ ...options, maxWidth })} />
             <NumberField label="Max D" value={options.maxDepth} min={4} max={64} title="Deepest a block may get, in cells" onChange={(maxDepth) => onOptionsChange({ ...options, maxDepth })} />
             <NumberField label="Max H" value={options.maxHeight} min={3} max={64} title="Module height in cells (one storey = 16)" onChange={(maxHeight) => onOptionsChange({ ...options, maxHeight })} />
-            <NumberField label="Levels" value={options.maxStack} min={1} max={16} title="Most machine levels per block (stacked directly or on metal stands)" onChange={(maxStack) => onOptionsChange({ ...options, maxStack })} />
+            <NumberField label="Levels" value={options.maxStack} min={1} max={16} title="Most machine levels per block (grinders stack directly, other machines on beam decks)" onChange={(maxStack) => onOptionsChange({ ...options, maxStack })} />
+            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)] cursor-pointer" title="Let belts cross gaps on drawbridge conveyors (only the anchor needs support). Needs the unlock and costs linen rope.">
+                <input type="checkbox" checked={!!options.useBridges} onChange={(e) => onOptionsChange({ ...options, useBridges: e.target.checked })} className="accent-[var(--accent-gold)]" />
+                Bridges
+            </label>
 
             <span className="w-px h-6 bg-[var(--border)] mx-1" />
 

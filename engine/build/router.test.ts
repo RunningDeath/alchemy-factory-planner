@@ -105,3 +105,26 @@ describe("routeModule via generateModule", () => {
     expect(mod.size[2]).toBeLessThanOrEqual(16);
   }, 30_000);
 });
+
+describe("one input belt per item per block", () => {
+  test("stacked grinders with a light input get a single entry: levels chained by lifts, columns fed by one header", () => {
+    const mod = generateModule(
+      [step({ nodeKey: "g", itemName: "Dust", deviceId: "grinder", machines: 12, inputs: [{ itemName: "Ore", perMachineRate: 5 }], outputs: [{ itemName: "Dust", perMachineRate: 5 }] })],
+      options,
+    );
+    expectFullyConnected(mod);
+    expect(mod.routes.filter((r) => r.itemName === "Ore")).toHaveLength(1);
+    expect(mod.tiers[0].levels).toBeGreaterThan(1);
+  });
+
+  test("bridges on: still fully connected and valid", () => {
+    const mod = generateModule(
+      [
+        step({ nodeKey: "g", itemName: "Flax Fiber", deviceId: "grinder", machines: 6, inputs: [{ itemName: "Flax", perMachineRate: 30 }], outputs: [{ itemName: "Flax Fiber", perMachineRate: 30 }] }),
+        step({ nodeKey: "a", itemName: "Linen", machines: 3, inputs: [{ itemName: "Flax Fiber", perMachineRate: 60 }], outputs: [{ itemName: "Linen", perMachineRate: 10 }] }),
+      ],
+      { ...options, useBridges: true },
+    );
+    expectFullyConnected(mod);
+  });
+});

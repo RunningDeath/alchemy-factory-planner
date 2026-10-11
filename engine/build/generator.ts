@@ -60,6 +60,8 @@ export interface ModuleOptions {
     /** Most machine levels per block */
     maxStack: number;
     beltSpeed: number;
+    /** Let belts cross gaps on drawbridge conveyors (needs the unlock; costs linen rope) */
+    useBridges?: boolean;
 }
 
 /** One storey: walls and pillars are 16 cells high */
@@ -422,6 +424,7 @@ function buildTier(
     // Lanes end above the filter rows when outputs need sorting
     const bottom = origin.y + shape.depth - 1 - filterRows(step);
     const laneItems = (flows: StepFlow[], machineCount: number) => flows.map((fl) => ({ itemName: fl.itemName, rate: fl.perMachineRate * machineCount }));
+    const inputLanes: InputLane[] = [];
 
     for (let level = 0; level < levelsUsed; level++) {
         const z = levelZ(level);
@@ -480,21 +483,12 @@ function buildTier(
             }
         }
 
-        // One lane per input item, stacked one level apart, entering at the top edge
-        for (const [laneX, byItem] of [...feedHits.entries()].sort((a, b) => a[0] - b[0])) {
+        // One lane per input item, stacked one level apart (emitted below)
+        for (const [laneX, byItem] of feedHits) {
             for (const [item, byY] of byItem) {
-                const lz = z + item;
-                const yEnd = Math.max(...byY.keys());
-                const served = new Set([...byY.values()].flatMap((h) => [...h.machines])).size;
-                for (let y = top; y <= yEnd; y++) {
-                    const outs: Side[] = [...new Set(byY.get(y)?.sides ?? [])];
-                    if (y < yEnd) outs.push("down");
-                    const piece = beltPieceFor(["up"], outs) ?? beltPieceFor(["up"], ["down"])!;
-                    const belt: Placement = { uid: nextUid("b"), id: piece.id, x: laneX, y, z: lz, rot: piece.rot, nodeKey: step.nodeKey, lane: "in", label: feed.items[item].itemName };
-                    if (y === top) belt.laneEnd = { kind: "in", items: laneItems([feed.items[item]], served) };
-                    belts.push(belt);
-                }
-                lanes.push(laneInfo("in", laneX - origin.x, level, lz, [feed.items[item]], served, beltSpeed));
+                const hits = new Map([...byY.entries()].map(([y, h]) => [y, h.sides]));
+                const machinesServed = new Set([...byY.values()].flatMap((h) => [...h.machines]));
+                inputLanes.push({ x: laneX, z: z + item, level, items: [feed.items[item]], hits, machines: machinesServed, separate: true });
             }
         }
 
@@ -502,6 +496,13 @@ function buildTier(
             const ys = [...byY.keys()];
             const feeds = ys.some((y) => byY.get(y)!.outs.length > 0);
             const collects = ys.some((y) => byY.get(y)!.ins.length > 0);
+            // Pure input lanes are emitted below, chained across levels and fed by one header
+            if (feeds && !collects) {
+                const laneHits = new Map(ys.map((y) => [y, [...new Set(byY.get(y)!.outs.map((h) => h.side))]] as [number, Side[]]));
+                const machinesServed = new Set([...byY.values()].flatMap((h) => h.outs.map((p) => p.machine.uid)));
+                inputLanes.push({ x: laneX, z, level, items: step.inputs, hits: laneHits, machines: machinesServed, separate: false });
+                continue;
+            }
             const yStart = feeds ? top : Math.min(...ys.filter((y) => byY.get(y)!.ins.length > 0));
             const yEnd = collects ? bottom : Math.max(...ys.filter((y) => byY.get(y)!.outs.length > 0));
 
@@ -543,6 +544,11 @@ function buildTier(
             if (collects) lanes.push(laneInfo("out", laneX - origin.x, level, z, step.outputs, laneMachines("ins"), beltSpeed));
         }
     }
+    const fed = emitInputLanes(inputLanes, { top, bottom, beltSpeed, nodeKey: step.nodeKey, origin });
+    belts.push(...fed.belts);
+    lifts.push(...fed.lifts);
+    lanes.push(...fed.lanes);
+
     placements.push(...lifts);
     placements.push(...belts);
 
@@ -557,7 +563,8 @@ function buildTier(
         const length = stacking.beamLength!;
         for (const endX of [d.x, d.x + length - 1]) placements.push(...supportColumn(occupancy, endX, d.y, d.z, 0, makeUid));
     }
-    const raised = [...belts, ...(platform?.belts ?? [])].filter((bb) => bb.z > 0).sort((a, c) => a.z - c.z);
+    const liftBottoms = fed.lifts.filter((l) => l.id === "conveyer-lift-upwards");
+    const raised = [...belts, ...liftBottoms, ...(platform?.belts ?? [])].filter((bb) => bb.z > 0).sort((a, c) => a.z - c.z);
     for (const b of raised) placements.push(...supportColumn(occupancy, b.x, b.y, b.z, 0, makeUid));
 
     return {
@@ -586,6 +593,148 @@ function buildTier(
             mixedInputs: step.inputs.length >= 2 && !feed.separate,
         },
     };
+}
+
+/** An input lane before its pieces are laid: column, height and the rows it feeds */
+interface InputLane {
+    x: number;
+    z: number;
+    level: number;
+    items: StepFlow[];
+    /** Row → sides of the lane cell that items leave toward machine inputs */
+    hits: Map<number, Side[]>;
+    machines: Set<string>;
+    /** One item of a separated feed (its stubs and lifts are already placed) */
+    separate: boolean;
+}
+
+function laneRate(lane: InputLane): number {
+    return lane.items.reduce((sum, fl) => sum + fl.perMachineRate, 0) * lane.machines.size;
+}
+
+/**
+ * Lays the input lanes so each item enters a block through as few belts as possible:
+ *
+ * - The levels of one lane column are chained: the lowest lane runs down, a lift at
+ *   its end carries the rest up to the next level, which runs back, and so on. One
+ *   entry feeds every level, as long as the whole column fits on one belt.
+ * - The column entries of an item are fed by one header belt in the free row in front
+ *   of the block (split into several headers only when one belt can't carry it all).
+ */
+function emitInputLanes(
+    inputLanes: InputLane[],
+    ctx: { top: number; bottom: number; beltSpeed: number; nodeKey: string; origin: { x: number; y: number; z: number } },
+): { belts: Placement[]; lifts: Placement[]; lanes: LaneInfo[] } {
+    const belts: Placement[] = [];
+    const lifts: Placement[] = [];
+    const lanes: LaneInfo[] = [];
+    const { top, bottom, nodeKey } = ctx;
+    const itemKey = (lane: InputLane) => lane.items.map((fl) => fl.itemName).join(" + ");
+    const opposite = (d: Side): Side => (d === "down" ? "up" : d === "up" ? "down" : d === "left" ? "right" : "left");
+    /** Entry points left after chaining: a belt at the top row taking items from above */
+    const entries: { belt: Placement; items: { itemName: string; rate: number }[]; x: number; z: number; key: string }[] = [];
+
+    const lift = (x: number, y: number, fromZ: number, toZ: number, inSide: Side, outSide: Side, label: string) => {
+        for (let lz = fromZ; lz <= toZ; lz++) {
+            const id = lz === fromZ ? "conveyer-lift-upwards" : lz === toZ ? "conveyer-lift-end-upwards" : "conveyer-lift-body";
+            const rot = lz === fromZ ? rotFor("left", inSide) : lz === toZ ? rotFor("down", outSide) : 0;
+            lifts.push({ uid: nextUid("l"), id, x, y, z: lz, rot, nodeKey, lane: "in", label });
+        }
+    };
+
+    const layLane = (lane: InputLane, dir: Side, start: number, end: number, continues: boolean) => {
+        const back = opposite(dir);
+        const step = dir === "down" ? 1 : -1;
+        let first: Placement | null = null;
+        for (let y = start; dir === "down" ? y <= end : y >= end; y += step) {
+            const outs: Side[] = [...(lane.hits.get(y) ?? [])];
+            if (y !== end || continues) outs.push(dir);
+            const piece = beltPieceFor([back], outs) ?? beltPieceFor([back], [dir])!;
+            const belt: Placement = { uid: nextUid("b"), id: piece.id, x: lane.x, y, z: lane.z, rot: piece.rot, nodeKey, lane: "in", label: itemKey(lane) };
+            belts.push(belt);
+            first ??= belt;
+        }
+        lanes.push(laneInfo("in", lane.x - ctx.origin.x, lane.level, lane.z, lane.items, lane.machines.size, ctx.beltSpeed));
+        return first!;
+    };
+
+    // Columns: lanes of the same items stacked in one x, lowest first
+    const columns = new Map<string, InputLane[]>();
+    for (const lane of inputLanes) {
+        const key = `${lane.x}|${lane.separate ? lane.z : "chain"}|${itemKey(lane)}`;
+        columns.set(key, [...(columns.get(key) ?? []), lane]);
+    }
+
+    for (const column of columns.values()) {
+        column.sort((a, b) => a.z - b.z);
+        const total = column.reduce((sum, l) => sum + laneRate(l), 0);
+        const chain = column.length > 1 && !column[0].separate && total <= ctx.beltSpeed + 1e-6;
+        const groups = chain ? [column] : column.map((l) => [l]);
+
+        for (const group of groups) {
+            const rate = (lanes: InputLane[]) =>
+                lanes[0].items.map((fl) => ({ itemName: fl.itemName, rate: fl.perMachineRate * lanes.reduce((sum, l) => sum + l.machines.size, 0) }));
+            group.forEach((lane, k) => {
+                const dir: Side = k % 2 === 0 ? "down" : "up";
+                const hasNext = k < group.length - 1;
+                const hitRows = [...lane.hits.keys()];
+                const start = k === 0 ? top : dir === "up" ? bottom - 1 : top + 1;
+                const end = hasNext ? (dir === "down" ? bottom - 1 : top + 1) : dir === "down" ? Math.max(...hitRows) : Math.min(...hitRows);
+                const first = layLane(lane, dir, start, end, hasNext);
+                if (k === 0) entries.push({ belt: first, items: rate(group), x: lane.x, z: lane.z, key: itemKey(lane) });
+                if (hasNext) {
+                    // At the end of the line, a lift takes the rest up to the next level, which runs back
+                    const liftRow = dir === "down" ? bottom : top;
+                    lift(lane.x, liftRow, lane.z, group[k + 1].z, dir === "down" ? "up" : "down", dir === "down" ? "up" : "down", itemKey(lane));
+                }
+            });
+        }
+    }
+
+    // One header per item and height in the free row in front of the block
+    const byKey = new Map<string, typeof entries>();
+    entries.forEach((e) => byKey.set(`${e.z}|${e.key}`, [...(byKey.get(`${e.z}|${e.key}`) ?? []), e]));
+    for (const group of byKey.values()) {
+        group.sort((a, b) => a.x - b.x);
+        // Split into headers that each fit on one belt
+        const segments: (typeof entries)[] = [];
+        let current: typeof entries = [];
+        let load = 0;
+        for (const e of group) {
+            const r = e.items.reduce((sum, i) => sum + i.rate, 0);
+            if (current.length && load + r > ctx.beltSpeed + 1e-6) {
+                segments.push(current);
+                current = [];
+                load = 0;
+            }
+            current.push(e);
+            load += r;
+        }
+        if (current.length) segments.push(current);
+
+        for (const segment of segments) {
+            const sum = segment[0].items.map((it) => ({ itemName: it.itemName, rate: segment.reduce((acc, e) => acc + (e.items.find((x) => x.itemName === it.itemName)?.rate ?? 0), 0) }));
+            if (segment.length === 1) {
+                segment[0].belt.laneEnd = { kind: "in", items: sum };
+                continue;
+            }
+            const y = top - 1;
+            const z = segment[0].z;
+            const xs = new Set(segment.map((e) => e.x));
+            const lastX = segment[segment.length - 1].x;
+            for (let x = segment[0].x; x <= lastX; x++) {
+                const outs: Side[] = [];
+                if (xs.has(x)) outs.push("down");
+                if (x < lastX) outs.push("right");
+                const ins: Side[] = [x === segment[0].x ? "up" : "left"];
+                const piece = beltPieceFor(ins, outs) ?? beltPieceFor(ins, ["right"])!;
+                const belt: Placement = { uid: nextUid("b"), id: piece.id, x, y, z, rot: piece.rot, nodeKey, lane: "in", label: segment[0].key };
+                if (x === segment[0].x) belt.laneEnd = { kind: "in", items: sum };
+                belts.push(belt);
+            }
+        }
+    }
+    return { belts, lifts, lanes };
 }
 
 /** Pipe connections a machine needs: fluid inputs (in) or fluid outputs (out) */
@@ -783,6 +932,7 @@ function layOut(
               margin: ROUTING_MARGIN,
               maxHeight: options.maxHeight,
               blockNames: tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`),
+              bridges: options.useBridges,
           })
         : { placements: [], routes: [], io: [] };
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,

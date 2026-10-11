@@ -38,6 +38,8 @@ export interface RouteResult {
     to: string;
     rate: number;
     ok: boolean;
+    /** Identifies the connection across routing passes */
+    key?: string;
 }
 
 export interface IoPoint {
@@ -60,7 +62,16 @@ export interface RouterOptions {
     maxHeight: number;
     /** Labels for blocks, by block index */
     blockNames: string[];
+    /** Drawbridge conveyors may cross gaps without supports (needs the unlock and linen rope) */
+    bridges?: boolean;
 }
+
+/** Drawbridge conveyor: anchor post (3 high, needs support) and a 3-cell deck that needs none */
+const BRIDGE_ID = "draw-bridge";
+const BRIDGE_DECK = 3;
+const BRIDGE_POST = 3;
+/** Extra cost of a bridge over plain belts: 6 wood boards and 6 linen rope */
+const BRIDGE_COST = 3;
 
 const LIFT = {
     upBottom: "conveyer-lift-upwards", // in: left
@@ -159,7 +170,15 @@ interface RouteNode {
 
 type Step =
     | { kind: "belt"; cell: Cell; inSide: Side; outSide: Side }
-    | { kind: "lift"; entry: Cell; exitZ: number; inSide: Side; outSide: Side };
+    | { kind: "lift"; entry: Cell; exitZ: number; inSide: Side; outSide: Side }
+    | { kind: "bridge"; anchor: Cell; heading: Side };
+
+/** Cells of a bridge whose anchor is at `anchor` and whose deck runs toward `heading` */
+function bridgeCells(anchor: Cell, heading: Side): Cell[] {
+    const cells: Cell[] = [anchor];
+    for (let i = 1; i <= BRIDGE_DECK; i++) cells.push(add(cells[i - 1], heading));
+    return cells;
+}
 
 interface SearchNode {
     cell: Cell;
@@ -223,7 +242,24 @@ type Goal =
     | { kind: "merge"; node: RouteNode; side: Side }
     | { kind: "edge" };
 
+/**
+ * Routes every connection; when some fail, routes the whole module again with the
+ * failed connections first (they usually lost out to earlier paths) and keeps the best.
+ */
 export function routeModule(placements: Placement[], options: RouterOptions): RoutingOutput {
+    let best: RoutingOutput | null = null;
+    let priority: string[] = [];
+    const failed = (r: RoutingOutput) => r.routes.filter((x) => !x.ok);
+    for (let pass = 0; pass < 3; pass++) {
+        const result = routeOnce(placements, options, priority);
+        if (!best || failed(result).length < failed(best).length) best = result;
+        if (failed(best).length === 0) break;
+        priority = [...new Set([...failed(result).map((r) => r.key!), ...priority])];
+    }
+    return best!;
+}
+
+function routeOnce(placements: Placement[], options: RouterOptions, priority: string[]): RoutingOutput {
     const all = [...placements];
     const occupancy: Occupancy = new Map();
     all.forEach((p) => addToOccupancy(occupancy, p));
@@ -282,7 +318,15 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
         };
         const beltCost = (c: Cell, turned: boolean) => {
             const s = supports(c);
-            return s === null ? null : 1 + (turned ? 0.3 : 0) + s * 0.8 + c[2] * 0.3;
+            if (s === null) return null;
+            // Running next to another belt (routed or a block lane) keeps belts bundled instead of spread out
+            const besideBelt = SIDES.some((side) => {
+                const n = add(c, side);
+                const routed = nodes.get(keyOf(n));
+                if (routed) return !routed.lift;
+                return (occupancy.get(keyOf(n)) ?? []).some((o) => o.id.startsWith("belt"));
+            });
+            return 1 + (turned ? 0.3 : 0) + s * 0.8 + c[2] * 0.3 - (besideBelt ? 0.35 : 0);
         };
 
         for (const s of starts) {
@@ -324,6 +368,29 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
                 }
             }
 
+            // Bridge: anchor in the next cell, deck straight ahead over whatever is below
+            if (options.bridges && cur.step.kind === "belt" && beltFree(n)) {
+                const cells = bridgeCells(n, cur.heading);
+                const postFree = Array.from({ length: BRIDGE_POST }, (_, i): Cell => [n[0], n[1], n[2] + i]).every(
+                    (c) => inBounds(c) && !reserved.has(keyOf(c)) && !nodes.has(keyOf(c)) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0),
+                );
+                const support = supports(n);
+                if (postFree && support !== null && cells.slice(1).every((c) => beltFree(c))) {
+                    const last = cells[cells.length - 1];
+                    const node: SearchNode = {
+                        cell: last,
+                        heading: cur.heading,
+                        g: cur.g + cells.length + BRIDGE_COST + support * 0.8 + n[2] * 0.3,
+                        f: 0,
+                        parent: cur,
+                        step: { kind: "bridge", anchor: n, heading: cur.heading },
+                    };
+                    node.f = node.g + h(last);
+                    const k = `${keyOf(last)}:${cur.heading}`;
+                    if ((best.get(k) ?? Infinity) > node.g) open.push(node);
+                }
+            }
+
             // Lift up or down from the next cell
             if (liftFree(n) && cur.step.kind === "belt") {
                 for (const z2 of liftLevels) {
@@ -361,7 +428,9 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
             const keys =
                 st.kind === "belt"
                     ? [keyOf(st.cell)]
-                    : Array.from({ length: Math.abs(st.exitZ - st.entry[2]) + 1 }, (_, i) => keyOf([st.entry[0], st.entry[1], Math.min(st.exitZ, st.entry[2]) + i]));
+                    : st.kind === "bridge"
+                      ? bridgeCells(st.anchor, st.heading).map(keyOf)
+                      : Array.from({ length: Math.abs(st.exitZ - st.entry[2]) + 1 }, (_, i) => keyOf([st.entry[0], st.entry[1], Math.min(st.exitZ, st.entry[2]) + i]));
             for (const k of keys) {
                 if (used.has(k)) return false;
                 used.add(k);
@@ -379,6 +448,22 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
                 addToOccupancy(occupancy, p);
                 all.push(...supportColumn(occupancy, st.cell[0], st.cell[1], st.cell[2], 0, () => makeUid("s")));
                 const node: RouteNode = { key: keyOf(st.cell), uid: p.uid, cell: st.cell, ins: [st.inSide], outs: [st.outSide], lift: false, prev: [], next: [], items: new Set([conn.itemName]), sources: new Set([sourceId]), sinks: new Set([sinkId]), tree };
+                nodes.set(node.key, node);
+                created.push(node);
+            } else if (st.kind === "bridge") {
+                const cells = bridgeCells(st.anchor, st.heading);
+                const xs = cells.map((c) => c[0]);
+                const ys = cells.map((c) => c[1]);
+                // Unrotated, the deck runs "up" (-y) from the anchor at its bottom end
+                const p: Placement = { uid: makeUid("g"), id: BRIDGE_ID, x: Math.min(...xs), y: Math.min(...ys), z: st.anchor[2], rot: rotFor("up", st.heading), label: conn.itemName, lane: "route" };
+                all.push(p);
+                byUid.set(p.uid, p);
+                addToOccupancy(occupancy, p);
+                cells.forEach((c) => reserved.add(keyOf(c)));
+                all.push(...supportColumn(occupancy, st.anchor[0], st.anchor[1], st.anchor[2], 0, () => makeUid("s")));
+                const last = cells[cells.length - 1];
+                // Not a place to split off or merge into
+                const node: RouteNode = { key: keyOf(last), uid: p.uid, cell: last, ins: [oppositeSide(st.heading)], outs: [st.heading], lift: true, prev: [], next: [], items: new Set([conn.itemName]), sources: new Set([sourceId]), sinks: new Set([sinkId]), tree };
                 nodes.set(node.key, node);
                 created.push(node);
             } else {
@@ -476,7 +561,14 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
         if (c.from === "import" || c.to === "export") return 1e6;
         return Math.abs(c.from.port[0] - c.to.port[0]) + Math.abs(c.from.port[1] - c.to.port[1]) + Math.abs(c.from.port[2] - c.to.port[2]);
     };
-    connections.sort((a, b) => distance(a) - distance(b));
+    const connKey = (c: Connection) =>
+        `${c.itemName}|${c.from === "import" ? "import" : c.from.uid}|${c.to === "export" ? "export" : c.to.uid}`;
+    // Failed connections of an earlier pass first, then short ones before long ones
+    const rank = (c: Connection) => {
+        const i = priority.indexOf(connKey(c));
+        return i >= 0 ? i - priority.length : 0;
+    };
+    connections.sort((a, b) => rank(a) - rank(b) || distance(a) - distance(b));
 
     for (const conn of connections) {
         const sourceId = conn.from === "import" ? `import:${conn.itemName}` : conn.from.uid;
@@ -575,7 +667,7 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
             const connected = e.kind === "in" ? entryFed.has(e.uid) : exitUsed.has(e.uid);
             if (!connected) reserveEnd(e);
         }
-        routes.push({ itemName: conn.itemName, from: endName(conn.from), to: endName(conn.to), rate: conn.rate, ok });
+        routes.push({ itemName: conn.itemName, from: endName(conn.from), to: endName(conn.to), rate: conn.rate, ok, key: connKey(conn) });
     }
 
     return { placements: all, routes, io };

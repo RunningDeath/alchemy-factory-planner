@@ -258,7 +258,7 @@ export function BuildPlanner() {
                             <span>
                                 Placing <b className="text-[var(--accent-gold)]">{buildingName(tool.id)}</b>
                                 {tool.label ? ` for ${tool.label}` : ""}: click to place
-                                {tool.id.startsWith("belt") ? ", drag to draw a belt" : ""} · R rotate · F variant · Esc stop
+                                {tool.id.startsWith("belt") ? ", drag to draw a belt along your path (drag back to undo)" : ""} · R rotate · F variant · Esc stop
                             </span>
                         ) : selected ? (
                             <span>
