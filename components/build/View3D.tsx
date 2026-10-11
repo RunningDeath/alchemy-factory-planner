@@ -352,11 +352,12 @@ function portArrows(placements: Placement[], ports: PortStatus[], cutLevel: numb
         if (!p) continue;
         const face = port.face;
         const [dx, dy] = face === "top" || face === "base" ? [0, 0] : SIDE_OFFSET[face];
-        if (isMachine(p)) {
+        // Machines and lifts: where items go in and come out (a lift's ends are far apart)
+        if (isMachine(p) || p.id.startsWith("conveyer-lift")) {
             const color = !status.connectedTo ? PORT_OPEN : port.dir === "in" ? PORT_IN : PORT_OUT;
             const pointing: Side | "top" | "base" = port.dir === "in" && face !== "top" && face !== "base" ? oppositeOf(face) : face;
             arrows.push({ x: port.x + 0.5 + dx * 0.62, y: port.y + 0.5 + dy * 0.62, z: port.z + 0.5, dir: pointing, size: 0.32, color });
-        } else if (port.dir === "out" && (isBeltPiece(p.id) || p.id.startsWith("conveyer-lift"))) {
+        } else if (port.dir === "out" && isBeltPiece(p.id)) {
             arrows.push({ x: port.x + 0.5 + dx * 0.25, y: port.y + 0.5 + dy * 0.25, z: port.z + 0.3, dir: face, size: 0.2, color: BELT_ARROW });
         }
     }

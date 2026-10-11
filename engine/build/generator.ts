@@ -1115,10 +1115,8 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         m.size[0] * m.size[1];
     // Near-feeder and stage-row layouts per corridor width, wider corridors if belts don't fit;
     // tight packing only as a last resort
-    const attempts: [number, LayoutMode][] = [
-        ...CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"]]),
-        [CORRIDORS[CORRIDORS.length - 1], "packed"],
-    ];
+    // Tight packing too at every width: it leaves the least free floor when its belts fit
+    const attempts: [number, LayoutMode][] = CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"], [c, "packed"]]);
     // Byproducts: second outputs that share a machine's output belt with its product;
     // left on the belt they would block the machine
     const leftovers = new Set(steps.flatMap((st) => (st.outputs.length >= 2 ? st.outputs.filter((o) => o.itemName !== st.itemName).map((o) => o.itemName) : [])));
@@ -1149,8 +1147,8 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
             onProgress?.(0);
             const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can, leftovers);
             if (!best || score(result) < score(best)) best = result;
-            // Both layouts of a corridor width get a chance before settling
-            if (mode === "flow" && best.routes.every((r) => r.ok)) break;
+            // All layouts of a corridor width get a chance before settling
+            if (mode === "packed" && best.routes.every((r) => r.ok)) break;
         }
         if (best?.routes.every((r) => r.ok)) break;
     }
