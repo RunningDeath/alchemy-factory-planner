@@ -104,7 +104,7 @@ describe("routeModule via generateModule", () => {
     // One fertilizer input for the whole module: the second nursery block branches off the first import
     expect(mod.io.filter((p) => p.kind === "import" && p.itemName === "Growth Potion")).toHaveLength(1);
     expect(mod.size[2]).toBeLessThanOrEqual(16);
-  }, 30_000);
+  }, 120_000);
 });
 
 describe("one input belt per item per block", () => {

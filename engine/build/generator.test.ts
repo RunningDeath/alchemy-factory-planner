@@ -157,7 +157,7 @@ describe("stepsFromReport → generateModule", () => {
     expect(mod.size[2]).toBeLessThanOrEqual(16);
     const grinders = mod.placements.filter((p) => p.id === "grinder").length;
     expect(grinders).toBe(steps.filter((s) => s.deviceId === "grinder").reduce((sum, s) => sum + s.machines, 0));
-  }, 30_000);
+  }, 120_000);
 });
 
 describe("separate inputs, filters and heating", () => {

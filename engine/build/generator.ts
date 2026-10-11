@@ -158,6 +158,11 @@ export interface GeneratedModule {
     locked: string[];
 }
 
+/** Widest corridor tried for stacked towers before falling back to blocks side by side */
+const TOWER_MAX_CORRIDOR = 3;
+/** After this long, stop trying more layouts once one routes everything */
+const TIME_BUDGET_MS = 60000;
+
 /** Free cells around each block, so belts can run between blocks; wider when routing fails */
 const CORRIDORS = [1, 2, 3];
 /** Free cells around the whole module for imports, exports and detours */
@@ -1122,11 +1127,16 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
               );
     // Stacked towers first; side by side only when the towers can't be belted together
     const layouts = towers.length < singles.length ? [towers, singles] : [singles];
-    const total = layouts.length * attempts.length;
+    // Stacked towers get the tight corridors only; when they don't route, side by side next
+    const attemptsFor = (set: Tower[]) => (set === towers && towers !== singles ? attempts.filter(([c]) => c <= TOWER_MAX_CORRIDOR) : attempts);
+    const total = layouts.reduce((sum, set) => sum + attemptsFor(set).length, 0);
+    const started = Date.now();
     let attempt = 0;
     for (const set of layouts) {
         const setFlow = towerFlow(set, flow);
-        for (const [corridor, mode] of attempts) {
+        for (const [corridor, mode] of attemptsFor(set)) {
+            // Long enough: settle for the best layout that routes everything
+            if (best?.routes.every((r) => r.ok) && Date.now() - started > TIME_BUDGET_MS) break;
             const label = `Layout ${attempt + 1} of up to ${total}${set === towers && towers !== singles ? " (stacked)" : ""}: routing belts`;
             const base = attempt++;
             const onProgress = options.onProgress && ((f: number) => options.onProgress!((base + f) / total, label));
