@@ -44,6 +44,7 @@ export interface RawBuilding {
   ID: number;
   DisplayName: { Key: string; SourceString: string };
   FurnitureType: string;
+  SecondaryType?: string;
   bHideInGame: boolean;
   HeatCost: number;
   GridConfigList: RawGridConfig[];
@@ -155,6 +156,9 @@ export function toFootprint(row: string, raw: RawBuilding, english: Record<strin
   };
   if (raw.HeatCost) footprint.heatCost = raw.HeatCost;
   if (raw.bHideInGame) footprint.hidden = true;
+  if (offset.some((o) => o !== 0)) footprint.origin = offset.map((o) => -o) as [number, number, number];
+  const secondary = raw.SecondaryType?.replace('ESecondaryType::', '');
+  if (secondary && secondary !== 'None') footprint.secondary = secondary;
   if (raw.AlterBuildOption && raw.AlterBuildOption !== 'None') footprint.alt = buildingIdFor(raw.AlterBuildOption);
   return footprint;
 }
