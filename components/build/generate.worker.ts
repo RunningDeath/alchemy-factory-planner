@@ -21,7 +21,7 @@ self.onmessage = (event: MessageEvent<GenerateRequest>) => {
     let lastPost = 0;
     let lastLabel = "";
     try {
-        const module = generateModule(event.data.steps, {
+        const generated = generateModule(event.data.steps, {
             ...event.data.options,
             onProgress: (fraction, label) => {
                 if (label) lastLabel = label;
@@ -32,7 +32,7 @@ self.onmessage = (event: MessageEvent<GenerateRequest>) => {
                 post({ type: "progress", fraction, label: lastLabel });
             },
         });
-        post({ type: "done", module });
+        post({ type: "done", module: generated });
     } catch (e) {
         post({ type: "error", message: e instanceof Error ? e.message : String(e) });
     }

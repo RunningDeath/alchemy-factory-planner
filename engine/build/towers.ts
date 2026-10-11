@@ -5,6 +5,7 @@
  * load, or the ground); lab stands let lane belts underneath keep running.
  */
 import { cellKey, cellsCollide, placementCells, type Placement } from "./layout";
+import { findLaneEnds } from "./router";
 import { addToOccupancy, isSupported, supportColumn, type Occupancy } from "./supports";
 
 export interface TowerMember {
@@ -41,26 +42,31 @@ interface TowerOptions {
 
 /** Upper block must save at least this share of its own floor */
 const MIN_SAVING = 0.3;
+/** How far an upper block may reach past the tower's edge */
+const OVERHANG = 3;
 /** Score per support column cell (wood is cheap, but a forest of columns isn't) */
 const SUPPORT_COST = 0.3;
 const RELATED_BONUS = 6;
 /** Per level up: high blocks mean long lifts and belts on tall columns */
 const HEIGHT_COST = 2;
-/** A lane end with no free shaft to the ground beside it means belts running high to the tower's edge */
-const BURIED_END_COST = 10;
 
-/** Lane ends of the upper block without a free column to the ground next to them */
-function buriedEnds(tower: Tower, fit: Fit): number {
+/**
+ * Lane ends a connecting belt can't reach: the cell in front of the end is taken, or (up
+ * in the air) neither it nor a neighbour has a free shaft to the ground for a lift or
+ * supports. Mounting a block must not add any: those connections would fail.
+ */
+function blockedEnds(placements: Placement[]): number {
     const occupied = new Set<string>();
-    for (const p of [...tower.placements, ...fit.moved, ...fit.supports]) for (const c of placementCells(p)) occupied.add(`${c.x},${c.y},${c.z}`);
+    for (const p of placements) for (const c of placementCells(p)) occupied.add(`${c.x},${c.y},${c.z}`);
     const shaftFree = (x: number, y: number, z: number) => {
         for (let k = 0; k <= z; k++) if (occupied.has(`${x},${y},${k}`)) return false;
         return true;
     };
-    return fit.moved
-        .filter((p) => p.laneEnd)
-        .filter((p) => ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => shaftFree(p.x + ox, p.y + oy, p.z)))
-        .length;
+    return findLaneEnds(placements).filter(({ port: [x, y, z] }) => {
+        if (occupied.has(`${x},${y},${z}`)) return true;
+        if (z === 0) return false;
+        return ![[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => shaftFree(x + ox, y + oy, z - 1));
+    }).length;
 }
 
 const shift = (ps: Placement[], dx: number, dy: number, dz: number) => ps.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy, z: p.z + dz }));
@@ -221,19 +227,22 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
             const tower = towers[t];
             if (!tower || t === i) continue;
             const top = topMap(tower.placements);
+            const blockedBefore = blockedEnds([...tower.placements, ...upper.placements.map((p) => ({ ...p, x: p.x + 10000 }))]);
             const related = tower.members.some((m) => opts.related(m.index, i));
-            const xs = [Math.min(0, tower.width - upper.width), Math.max(0, tower.width - upper.width)];
-            const ys = [Math.min(0, tower.depth - upper.depth), Math.max(0, tower.depth - upper.depth)];
+            // Up to a few cells past the edge, so the upper block's lane ends can reach down
+            const xs = [Math.min(0, tower.width - upper.width) - OVERHANG, Math.max(0, tower.width - upper.width) + OVERHANG];
+            const ys = [Math.min(0, tower.depth - upper.depth) - OVERHANG, Math.max(0, tower.depth - upper.depth) + OVERHANG];
             for (let dx = xs[0]; dx <= xs[1]; dx++)
                 for (let dy = ys[0]; dy <= ys[1]; dy++) {
                     const fit = mount(tower, top, upper, dx, dy, opts);
                     if (!fit) continue;
+                    if (blockedEnds([...tower.placements, ...fit.moved, ...fit.supports]) > blockedBefore) continue;
                     const reach = bounds([...fit.moved, ...fit.supports]);
                     const width = Math.max(tower.width, dx + upper.width, reach.maxX + 1) - Math.min(0, dx, reach.minX);
                     const depth = Math.max(tower.depth, dy + upper.depth, reach.maxY + 1) - Math.min(0, dy, reach.minY);
                     const saved = tower.width * tower.depth + area - width * depth;
                     if (saved < area * MIN_SAVING) continue;
-                    const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST - buriedEnds(tower, fit) * BURIED_END_COST;
+                    const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST;
                     if (!best || score > best.score) best = { t, dx, dy, score, fit };
                 }
         }

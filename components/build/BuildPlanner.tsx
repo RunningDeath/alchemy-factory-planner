@@ -297,7 +297,7 @@ export function BuildPlanner() {
             <BuildToolbar
                 options={options}
                 onOptionsChange={(next) => factory && setBuildLayout(factory.id, { ...(layout ?? { placements: [] }), options: next })}
-                canGenerate={steps.length > 0}
+                canGenerate={steps.length > 0 && !progress}
                 onGenerate={handleGenerate}
                 onClear={() => placements.length > 0 && window.confirm("Remove every building from this layout?") && commit({ placements: [], options })}
                 level={level}
@@ -323,6 +323,7 @@ export function BuildPlanner() {
                 unlocks={unlocks}
                 onUnlocksChange={setUnlocks}
             />
+            {progress && <GenerateProgress fraction={progress.fraction} label={progress.label} onAbort={abortGenerate} />}
             <div className="flex flex-1 min-h-0">
                 <aside className="w-56 shrink-0 border-r border-[var(--border)] p-3 overflow-y-auto custom-scrollbar">
                     <BuildPalette steps={steps} placedByNode={placedByNode} tool={tool} onSelectTool={setTool} />
