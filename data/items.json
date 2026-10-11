@@ -1537,7 +1537,7 @@
   },
   {
     "id": "sand2",
-    "name": "Refined Sand",
+    "name": "Refined Sand 2",
     "category": "misc",
     "cost": 8,
     "base_cost": 8,
@@ -1548,7 +1548,7 @@
   },
   {
     "id": "sand3",
-    "name": "Refined Sand",
+    "name": "Refined Sand 3",
     "category": "misc",
     "cost": 16,
     "base_cost": 16,
@@ -1559,7 +1559,7 @@
   },
   {
     "id": "sand4",
-    "name": "Refined Sand",
+    "name": "Refined Sand 4",
     "category": "misc",
     "cost": 32,
     "base_cost": 32,
@@ -1570,7 +1570,7 @@
   },
   {
     "id": "sand5",
-    "name": "Refined Sand",
+    "name": "Refined Sand 5",
     "category": "misc",
     "cost": 64,
     "base_cost": 64,
@@ -1581,7 +1581,7 @@
   },
   {
     "id": "sand6",
-    "name": "Refined Sand",
+    "name": "Refined Sand 6",
     "category": "misc",
     "cost": 128,
     "base_cost": 128,
@@ -1592,7 +1592,7 @@
   },
   {
     "id": "sand7",
-    "name": "Refined Sand",
+    "name": "Refined Sand 7",
     "category": "solid",
     "cost": 256,
     "base_cost": 256,
