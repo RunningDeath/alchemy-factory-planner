@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Sparkles, Calculator, Package, Cog, BookOpen } from "lucide-react";
 import { AlchemyIcon } from "@/components/icons/AlchemyIcon";
-import { FeedbackButton } from "@/components/ui/FeedbackButton";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +16,10 @@ const codexLinks = [
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const [codexOpen, setCodexOpen] = useState(false);
+  // The dropdown remembers the page it was opened on, so it closes on route change
+  const [codexOpenOn, setCodexOpenOn] = useState<string | null>(null);
+  const codexOpen = codexOpenOn === pathname;
+  const setCodexOpen = (open: boolean) => setCodexOpenOn(open ? pathname : null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isCalculator = pathname === "/";
@@ -30,17 +32,12 @@ export function SiteHeader() {
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setCodexOpen(false);
+        setCodexOpenOn(null);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Close dropdown on route change
-  useEffect(() => {
-    setCodexOpen(false);
-  }, [pathname]);
 
   return (
     <header className="bg-[var(--background)] text-[var(--text-primary)] p-2 lg:p-8 pb-4 lg:pb-6 bg-arcane-pattern">
@@ -163,7 +160,6 @@ export function SiteHeader() {
         {/* Actions */}
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <FeedbackButton />
         </div>
       </div>
     </header>
