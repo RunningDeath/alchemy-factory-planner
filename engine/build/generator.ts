@@ -21,7 +21,7 @@
  * the blocks to each other is left to the player.
  */
 import { beltPieceFor } from "./belt-pieces";
-import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, type Rotation } from "./footprint";
+import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, STACKS_ON_ITSELF, type Rotation } from "./footprint";
 import { buildOccupancy, placementPorts, type Placement } from "./layout";
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
@@ -866,6 +866,120 @@ function laneInfo(kind: "in" | "out", x: number, level: number, z: number, flows
     return { kind, x, level, z, items, rate, overBelt: rate > beltSpeed + 1e-6 };
 }
 
+/** Cauldron columns: a cauldron and its in-stub, out-stub and a free column for lifts */
+const CAULDRON_PITCH = 5;
+
+/**
+ * Cauldrons, laid out like players build them: a row of columns, each on its own
+ * heating pad (steam) or stove, with cauldrons stacked on cauldrons above it (they share
+ * the heat). Every input port gets a one-cell stub belt (top, left, bottom) and the
+ * output port one on the right; the router belts the stubs to the rest of the module.
+ */
+function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprint, origin: { x: number; y: number; z: number }, index: number, opts: ModuleOptions, can: Capabilities) {
+    const heating = step.heating!;
+    const steam = heating.kind === "steam";
+    const baseZ = steam ? PLATFORM_HEIGHT.steam : PLATFORM_HEIGHT.stove;
+    const pitch = fp.size.z;
+    const maxColumns = Math.max(1, Math.floor((opts.maxWidth - 1) / CAULDRON_PITCH));
+    const maxLevels = can.lifts ? Math.max(1, Math.min(opts.maxStack, Math.floor((opts.maxHeight - baseZ - 1) / pitch))) : 1;
+    const levels = Math.min(maxLevels, Math.ceil(count / Math.min(count, maxColumns)));
+    const columns = Math.ceil(count / levels);
+
+    // Ports by side: which input item each one takes (an item used twice takes two ports)
+    const portItems: StepFlow[] = [];
+    const totalCount = step.inputs.reduce((s, f) => s + f.perMachineRate, 0) || 1;
+    for (const f of step.inputs) {
+        const ports = Math.max(1, Math.round((f.perMachineRate / totalCount) * 3));
+        for (let k = 0; k < ports && portItems.length < 3; k++) portItems.push({ itemName: f.itemName, perMachineRate: f.perMachineRate / ports });
+    }
+    const inSides: { side: Side; dx: number; dy: number }[] = [
+        { side: "up", dx: 1, dy: -1 },
+        { side: "down", dx: 1, dy: 3 },
+        { side: "left", dx: -1, dy: 1 },
+    ];
+
+    const placements: Placement[] = [];
+    const stubs: Placement[] = [];
+    let placed = 0;
+    for (let col = 0; col < columns && placed < count; col++) {
+        const x = origin.x + 1 + col * CAULDRON_PITCH;
+        const y = origin.y + 1;
+        const heater: Placement = { uid: nextUid("h"), id: steam ? STEAM_HEATER_ID : STOVE_ID, x, y, z: 0, rot: 0 };
+        if (steam) heater.pipeEnd = { kind: "in", items: [{ itemName: heating.fuelItem, rate: heating.fuelRate / columns }] };
+        placements.push(heater);
+        if (!steam) {
+            // Stove fuel enters from below
+            const piece = beltPieceFor(["down"], ["up"])!;
+            stubs.push({
+                uid: nextUid("b"), id: piece.id, x: x + 1, y: y + 3, z: 1, rot: piece.rot, lane: "in", label: heating.fuelItem, nodeKey: step.nodeKey,
+                laneEnd: { kind: "in", items: [{ itemName: heating.fuelItem, rate: heating.fuelRate / columns }] },
+            });
+        }
+        for (let level = 0; level < levels && placed < count; level++, placed++) {
+            const z = baseZ + level * pitch;
+            placements.push({ uid: nextUid("m"), id: step.deviceId, x, y, z, rot: 0, nodeKey: step.nodeKey, label: step.itemName });
+            const portZ = z + 1;
+            portItems.forEach((flow, k) => {
+                const { side, dx, dy } = inSides[k];
+                const piece = beltPieceFor([oppositeSide(side)], [side])!;
+                stubs.push({
+                    uid: nextUid("b"), id: piece.id, x: x + dx, y: y + dy, z: portZ, rot: piece.rot, lane: "in", label: flow.itemName, nodeKey: step.nodeKey,
+                    laneEnd: { kind: "in", items: [{ itemName: flow.itemName, rate: flow.perMachineRate }] },
+                });
+            });
+            const out = beltPieceFor(["left"], ["right"])!;
+            stubs.push({
+                uid: nextUid("b"), id: out.id, x: x + 3, y: y + 1, z: portZ, rot: out.rot, lane: "out", label: step.outputs.map((o) => o.itemName).join(" + "), nodeKey: step.nodeKey,
+                laneEnd: { kind: "out", items: step.outputs.map((o) => ({ itemName: o.itemName, rate: o.perMachineRate })) },
+            });
+        }
+    }
+    placements.push(...stubs);
+    const occupancy = buildOccupancy(placements);
+    const makeUid = () => nextUid("f");
+    for (const b of [...stubs].filter((s) => s.z > 0).sort((a, c) => a.z - c.z)) placements.push(...supportColumn(occupancy, b.x, b.y, b.z, 0, makeUid));
+
+    const width = 1 + columns * CAULDRON_PITCH;
+    const depth = 5;
+    const lanes: LaneInfo[] = [
+        laneInfo("in", 0, 0, baseZ + 1, step.inputs, count, opts.beltSpeed),
+        laneInfo("out", width - 1, 0, baseZ + 1, step.outputs, count, opts.beltSpeed),
+    ];
+    return {
+        placements,
+        info: {
+            index,
+            nodeKey: step.nodeKey,
+            itemName: step.itemName,
+            deviceId: step.deviceId,
+            machines: count,
+            x: origin.x,
+            y: origin.y,
+            z: origin.z,
+            height: baseZ + levels * pitch + 1,
+            width,
+            depth,
+            turned: false,
+            columns,
+            rows: 1,
+            levels,
+            stacking: levels > 1 ? ("direct" as const) : ("none" as const),
+            lanes,
+            fluidInputs: step.fluidInputs,
+            offLanePorts: 0,
+            heating: {
+                kind: heating.kind,
+                devices: columns,
+                fuelItem: heating.fuelItem,
+                fuelRate: heating.fuelRate,
+                slotsUsed: count,
+                slotsAvailable: columns * levels,
+            },
+        } satisfies TierInfo,
+    };
+}
+
+
 /** Lay every step out as blocks and pack them tightly on the ground */
 export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
@@ -880,6 +994,18 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         const count = Math.ceil(step.machines - 1e-9);
         if (!fp || count <= 0) continue;
         const rot = machineRotation(fp);
+        if (STACKS_ON_ITSELF.has(step.deviceId) && step.heating) {
+            // Cauldrons: their own layout, as many per block as fit
+            const perBlock = Math.max(1, Math.floor((options.maxWidth - 1) / CAULDRON_PITCH)) * Math.max(1, options.maxStack);
+            for (let left = count; left > 0; left -= perBlock) {
+                const block = buildCauldronTier(step, Math.min(left, perBlock), fp, { x: 0, y: 1, z: 0 }, blocks.length, options, can);
+                block.info.y = 0;
+                block.info.depth += 1;
+                block.placements = block.placements.map((p) => ({ ...p, block: blocks.length }));
+                blocks.push(block);
+            }
+            continue;
+        }
         // Heated machines need their heat source right under them: no stacking
         const stacking: Stacking = step.heating ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
         const baseZ = step.heating ? PLATFORM_HEIGHT[step.heating.kind] : 0;

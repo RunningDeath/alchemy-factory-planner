@@ -59,6 +59,8 @@ export function buildLPModel(
   const fuelId = normalizeItemId(ctx.selectedFuel);
   const fertilizerId = ctx.selectedFertilizer ? normalizeItemId(ctx.selectedFertilizer) : null;
 
+  const machineCost = new Map<string, number>();
+
   // Build item flow coefficients for each recipe
   recipesFor(ctx).forEach((recipe) => {
     // Skip recipes that produce fuel/fertilizer if self-production is disabled
@@ -234,6 +236,8 @@ export function buildLPModel(
     }
 
     variables.set(recipeVar, recipeCoeffs);
+    // Machines this recipe needs per run a minute: weighs complexity against raw cost
+    if (ctx.machineWeight > 0) machineCost.set(recipeVar, (ctx.machineWeight * recipeTime) / (60 * ctx.speedMultiplier));
   });
 
   // Build available resources lookup
@@ -293,8 +297,8 @@ export function buildLPModel(
     constraints.set(`item_${itemName}`, { min: rhs });
   });
 
-  // Build objective: minimize cost of raw materials
-  const objective = new Map<string, number>();
+  // Build objective: minimize cost of raw materials (plus machines, when weighted)
+  const objective = new Map<string, number>(machineCost);
   variables.forEach((_, varName) => {
     if (varName.startsWith("raw_")) {
       const itemName = varName.slice(4); // Remove "raw_" prefix

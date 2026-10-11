@@ -11,6 +11,8 @@ export interface EfficiencyContext {
   selfFuel: boolean;
   selfFertilizer: boolean;
   useCauldron: boolean;
+  /** Cost of one machine in the objective, next to raw material cost (0: raw cost only) */
+  machineWeight: number;
   cauldronBuyInputs: boolean;
 }
 

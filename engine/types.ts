@@ -126,6 +126,8 @@ export interface PlannerConfig {
   useCauldron?: boolean;
   /** Cauldron inputs may be bought at the purchasing portal (else they are made in the factory) */
   cauldronBuyInputs?: boolean;
+  /** Cost of one machine next to raw material cost (default: 0, or a fixed weight with the cauldron on) */
+  machineWeight?: number;
 }
 
 export interface ResearchState {

@@ -26,23 +26,35 @@ function isFluidItem(id: string): boolean {
     return categories.some((c) => (FLUID_CATEGORIES as readonly string[]).includes(c));
 }
 
-/** Time per craft by target value (interpolated between these points) */
-const TIME_POINTS: [number, number][] = [
-    [1, 3],
-    [100, 6],
-    [1000, 12],
-    [10000, 24],
-    [1000000, 60],
-];
+/** Time (s) and heat per craft by target value, interpolated between these points */
+const TARGETS = [1, 100, 1000, 10000, 1000000];
+const TIMES = [3, 6, 12, 24, 60];
+const HEATS = [1, 20, 200, 1500, 10000];
+
+function interpolate(target: number, values: number[]): number {
+    if (target <= TARGETS[0]) return values[0];
+    for (let i = 0; i < TARGETS.length - 1; i++) {
+        if (target <= TARGETS[i + 1]) {
+            const p = (target - TARGETS[i]) / (TARGETS[i + 1] - TARGETS[i]);
+            return Math.round((values[i] + p * (values[i + 1] - values[i])) * 10) / 10;
+        }
+    }
+    return values[values.length - 1];
+}
 
 export function cauldronTime(target: number): number {
-    if (target <= TIME_POINTS[0][0]) return TIME_POINTS[0][1];
-    for (let i = 0; i < TIME_POINTS.length - 1; i++) {
-        const [t0, s0] = TIME_POINTS[i];
-        const [t1, s1] = TIME_POINTS[i + 1];
-        if (target <= t1) return Math.round((s0 + ((target - t0) / (t1 - t0)) * (s1 - s0)) * 10) / 10;
-    }
-    return TIME_POINTS[TIME_POINTS.length - 1][1];
+    return interpolate(target, TIMES);
+}
+
+/** Heat one craft uses; the cauldron stands on a heating pad or stove */
+export function cauldronHeat(target: number): number {
+    return interpolate(target, HEATS);
+}
+
+/** Heat per craft of the cauldron making this item */
+export function cauldronHeatFor(itemId: string): number {
+    const target = itemById.get(itemId)?.cauldron_target;
+    return target === undefined ? 0 : cauldronHeat(target);
 }
 
 /** Materials the cauldron can make: a target value and a non-zero weight */

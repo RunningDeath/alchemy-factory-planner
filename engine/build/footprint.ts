@@ -102,8 +102,20 @@ const MACHINE_CATEGORIES = new Set(["production", "portal", "storage"]);
  * ones carry anything; player blueprints rest machines on grinders (fully or partly),
  * lab stands, beams, wood blocks and the stove, never on other machines.
  */
-export function canSupport(supporter: BuildingFootprint): boolean {
+export function canSupport(supporter: BuildingFootprint, carried?: BuildingFootprint): boolean {
+    if (carried && carried.id === supporter.id && STACKS_ON_ITSELF.has(supporter.id)) return true;
     return !MACHINE_CATEGORIES.has(supporter.category) || isDirectlyStackable(supporter);
+}
+
+/** Machines that stack on their own kind: cauldrons share one heating pad that way */
+export const STACKS_ON_ITSELF = new Set(["cauldron", "advanced-cauldron"]);
+
+/** Machines that need heat from below although the game lists no heat cost for them (cauldrons) */
+export const HEATED_MACHINES = new Set(["cauldron", "advanced-cauldron"]);
+
+/** Heated production machine: stands on a heating device (or, for cauldrons, on a heated cauldron) */
+export function needsHeat(fp: BuildingFootprint): boolean {
+    return fp.category === "production" && (!!fp.heatCost || HEATED_MACHINES.has(fp.id));
 }
 
 /** Ports in local (rotated) coordinates */

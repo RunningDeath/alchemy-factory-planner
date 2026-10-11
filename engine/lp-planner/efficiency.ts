@@ -91,9 +91,14 @@ export function buildEfficiencyContext(config: PlannerConfig): EfficiencyContext
     selfFuel: config.selfFuel ?? true,
     selfFertilizer: config.selfFertilizer ?? true,
     useCauldron: config.useCauldron ?? false,
+    // With the cauldron the point is a simpler factory: fewer machines count for something
+    machineWeight: config.machineWeight ?? (config.useCauldron ? DEFAULT_MACHINE_WEIGHT : 0),
     cauldronBuyInputs: config.cauldronBuyInputs ?? false,
   };
 }
+
+/** Coins a machine is worth when weighing a simpler factory against raw material cost */
+export const DEFAULT_MACHINE_WEIGHT = 1000;
 
 /**
  * Check if a machine type gets the alchemy skill multiplier

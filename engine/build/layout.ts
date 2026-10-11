@@ -7,7 +7,7 @@
  *   of another building directly below it.
  * - Ports connect when two neighbouring cells face each other with matching directions.
  */
-import { canSupport, footprintCells, footprintPorts, getFootprint, oppositeSide, SIDE_OFFSET, type Rotation } from "./footprint";
+import { canSupport, footprintCells, footprintPorts, getFootprint, needsHeat, oppositeSide, SIDE_OFFSET, STACKS_ON_ITSELF, type Rotation } from "./footprint";
 import type { FootprintCell, FootprintPort, Side } from "./types";
 
 export interface Placement {
@@ -106,7 +106,7 @@ export function placementIssues(p: Placement, occupancy: Map<string, WorldCell[]
         if (!unsupported && c.foundation && c.z > 0 && !own.has(cellKey(c.x, c.y, c.z - 1))) {
             const below = occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? [];
             const supported = below.some(
-                (b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0 && canSupport(getFootprint(b.id)!),
+                (b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0 && canSupport(getFootprint(b.id)!, getFootprint(p.id)),
             );
             if (!supported) unsupported = { kind: "unsupported", uid: p.uid, cell: [c.x, c.y, c.z] };
         }
@@ -114,11 +114,13 @@ export function placementIssues(p: Placement, occupancy: Map<string, WorldCell[]
     if (unsupported) issues.push(unsupported);
 
     const fp = getFootprint(p.id)!;
-    if (fp.heatCost && fp.category === "production") {
+    if (needsHeat(fp)) {
         const bottom = Math.min(...cells.map((c) => c.z));
+        // Cauldrons stacked on a cauldron share its heat
+        const heatsFrom = (id: string) => getFootprint(id)?.category === "heating" || (STACKS_ON_ITSELF.has(fp.id) && id === fp.id);
         const heated = cells
             .filter((c) => c.z === bottom && c.foundation)
-            .every((c) => (occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? []).some((b) => getFootprint(b.id)?.category === "heating"));
+            .every((c) => (occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? []).some((b) => b.uid !== p.uid && heatsFrom(b.id)));
         if (!heated) issues.push({ kind: "unheated", uid: p.uid });
     }
     return issues;

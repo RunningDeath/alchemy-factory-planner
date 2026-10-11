@@ -4,7 +4,9 @@
  */
 import { isFluidItem, type BeltReport, type NodeBeltInfo } from "../belt-analysis";
 import { splitEdgeKey } from "../plan-graph";
-import { getFootprint } from "./footprint";
+import { getItem } from "../item-utils";
+import { cauldronHeatFor } from "../cauldron";
+import { getFootprint, HEATED_MACHINES } from "./footprint";
 import type { ModuleStep } from "./generator";
 
 /** Producers before consumers; cycles are broken in report order */
@@ -43,6 +45,7 @@ const heatingKind = (item: string) => (isFluidItem(item) ? "steam" : "stove");
  * fuel is then what the edge carries beyond the recipe's share.
  */
 function heatingFor(report: BeltReport, info: NodeBeltInfo, fuel?: string): ModuleStep["heating"] {
+    if (info.deviceId && HEATED_MACHINES.has(info.deviceId)) return cauldronHeating(info, fuel);
     if (!info.deviceId || !getFootprint(info.deviceId)?.heatCost) return undefined;
     const recipeInputs = new Set(info.perMachineInputs.map((f) => f.itemName));
     const incoming = Object.entries(report.edges)
@@ -58,6 +61,15 @@ function heatingFor(report: BeltReport, info: NodeBeltInfo, fuel?: string): Modu
     const recipeShare = output?.perMachineRate ? (info.demandRate * input.perMachineRate) / output.perMachineRate : 0;
     const demand = incoming.filter((e) => e.item === fuel).reduce((sum, e) => sum + e.demand, 0);
     return { kind: heatingKind(fuel), fuelItem: fuel, fuelRate: Math.max(0, demand - recipeShare) };
+}
+
+/** Cauldrons heat per craft: steam pads with steam, stoves with any other fuel */
+function cauldronHeating(info: NodeBeltInfo, fuel?: string): ModuleStep["heating"] {
+    const fuelItem = fuel || "Coal";
+    const heatValue = getItem(fuelItem)?.heat_value ?? 0;
+    const product = getItem(info.itemName)?.id ?? info.itemName;
+    const heatPerMinute = info.demandRate * cauldronHeatFor(product);
+    return { kind: heatingKind(fuelItem), fuelItem, fuelRate: heatValue > 0 ? heatPerMinute / heatValue : 0 };
 }
 
 const flows = (list: NodeBeltInfo["perMachineInputs"], fluid: boolean) =>
