@@ -106,9 +106,29 @@ function boxesFor(p: Placement, color: THREE.Color, cutLevel: number | null): Bo
     return boxes;
 }
 
-function instancedMesh(boxes: Box[], material: THREE.Material): THREE.InstancedMesh {
+/**
+ * Per-vertex shade for machine boxes: sides darken towards the floor and the top face is
+ * a little darker than the sides' upper edge, so stacked and neighbouring machines read
+ * as separate bodies. Multiplied with the instance colour (needs vertexColors).
+ */
+function shadeBoxGeometry(geometry: THREE.BoxGeometry) {
+    const position = geometry.attributes.position;
+    const normal = geometry.attributes.normal;
+    const shades = new Float32Array(position.count * 3);
+    for (let i = 0; i < position.count; i++) {
+        const isTop = normal.getY(i) > 0.5;
+        const isBottom = normal.getY(i) < -0.5;
+        // y runs 0..1 after the translate
+        const shade = isTop ? 0.78 : isBottom ? 0.5 : 0.6 + 0.4 * position.getY(i);
+        shades.set([shade, shade, shade], i * 3);
+    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(shades, 3));
+}
+
+function instancedMesh(boxes: Box[], material: THREE.Material, shaded = false): THREE.InstancedMesh {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     geometry.translate(0.5, 0.5, 0.5);
+    if (shaded) shadeBoxGeometry(geometry);
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, boxes.length));
     mesh.count = boxes.length;
     const matrix = new THREE.Matrix4();
@@ -178,6 +198,91 @@ function textSprite(lines: string[], color: string, cellHeight: number): THREE.S
     sprite.renderOrder = 10;
     return sprite;
 }
+
+const MACHINE_LABEL_FONT = 30;
+const MACHINE_LABEL_MAX_CHARS = 24;
+
+function shorten(text: string): string {
+    return text.length > MACHINE_LABEL_MAX_CHARS ? `${text.slice(0, MACHINE_LABEL_MAX_CHARS - 1)}…` : text;
+}
+
+/** Canvas for one machine label: the product in its item colour, the machine name below */
+function machineLabelMaterial(product: string, machine: string, color: string, dimmed: boolean): { material: THREE.SpriteMaterial; aspect: number } {
+    const fontSize = MACHINE_LABEL_FONT;
+    const padding = 8;
+    const lineHeight = fontSize + 6;
+    const lines = product ? [product, machine] : [machine];
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+    const font = (bold: boolean) => `${bold ? "bold " : ""}${fontSize}px sans-serif`;
+    const widths = lines.map((line, i) => {
+        ctx.font = font(i === 0);
+        return ctx.measureText(line).width;
+    });
+    const width = Math.ceil(Math.max(...widths)) + padding * 2;
+    const height = lines.length * lineHeight + padding * 2 - 6;
+    canvas.width = width;
+    canvas.height = height;
+    ctx.fillStyle = "rgba(14, 10, 22, 0.82)";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(1.5, 1.5, width - 3, height - 3, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.textBaseline = "top";
+    lines.forEach((line, i) => {
+        ctx.font = font(i === 0);
+        ctx.fillStyle = i === 0 && product ? color : "#e8e0d4";
+        ctx.fillText(line, padding, padding + i * lineHeight);
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: dimmed ? 0.35 : 1 });
+    return { material, aspect: width / height };
+}
+
+/**
+ * A small camera-facing label above every production machine: what it makes and what
+ * it is. Identical labels share one texture and material, so thousands stay cheap.
+ */
+function machineLabels(placements: Placement[], cutLevel: number | null, itemColors: Map<string, string>, highlightItem: string | null): THREE.Sprite[] {
+    const sprites: THREE.Sprite[] = [];
+    const cache = new Map<string, { material: THREE.SpriteMaterial; aspect: number }>();
+    for (const p of placements) {
+        const fp = getFootprint(p.id);
+        if (fp?.category !== "production") continue;
+        if (cutLevel !== null && p.z > cutLevel) continue;
+        const size = rotatedSize(fp, p.rot);
+        const top = cutLevel !== null ? Math.min(p.z + size.z, cutLevel + 1) : p.z + size.z;
+        const product = p.label ? shorten(p.label) : "";
+        const machine = shorten(buildingName(p.id));
+        const item = carriedItem(p);
+        const color = (item && itemColors.get(item)) || "#f0d078";
+        const dimmed = !!highlightItem && item !== highlightItem;
+        const key = `${product}\u0000${machine}\u0000${color}\u0000${dimmed}`;
+        let entry = cache.get(key);
+        if (!entry) {
+            entry = machineLabelMaterial(product, machine, color, dimmed);
+            cache.set(key, entry);
+        }
+        const sprite = new THREE.Sprite(entry.material);
+        // Fit the label to the machine's footprint, within readable limits
+        const labelWidth = Math.min(Math.max(Math.min(size.x, size.y) * 1.1, 1.4), 3);
+        const labelHeight = labelWidth / entry.aspect;
+        sprite.scale.set(labelWidth, labelHeight, 1);
+        sprite.position.set(p.x + size.x / 2, top + 0.15 + labelHeight / 2, p.y + size.y / 2);
+        sprite.renderOrder = 5;
+        sprite.userData.machineLabel = true;
+        sprites.push(sprite);
+    }
+    return sprites;
+}
+
+/** Machine labels only show up close to the camera, so the overview stays readable */
+const MACHINE_LABEL_DISTANCE = 55;
 
 /** Block names above each block, imports/exports at the edge, and any lane left unconnected */
 function blockLabels(tiers: TierInfo[], io: IoPoint[], placements: Placement[], ports: PortStatus[]): THREE.Sprite[] {
@@ -297,14 +402,18 @@ interface SceneState {
     objects: THREE.Object3D[];
     /** Meshes that answer hover, with the placement behind each instance */
     pickables: { mesh: THREE.InstancedMesh; owners: string[] }[];
+    /** Per-machine labels, hidden when far from the camera */
+    machineLabels: THREE.Sprite[];
     framed: boolean;
 }
 
-function disposeObject(o: THREE.Object3D) {
+function disposeObject(o: THREE.Object3D, disposed: Set<THREE.Material>) {
     if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
         o.geometry.dispose();
         (o.material as THREE.Material).dispose();
     } else if (o instanceof THREE.Sprite) {
+        if (disposed.has(o.material)) return;
+        disposed.add(o.material);
         o.material.map?.dispose();
         o.material.dispose();
     }
@@ -347,6 +456,9 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
         const animate = () => {
             frame = requestAnimationFrame(animate);
             controls.update();
+            const labels = sceneRef.current?.machineLabels ?? [];
+            const maxDistanceSq = MACHINE_LABEL_DISTANCE * MACHINE_LABEL_DISTANCE;
+            for (const label of labels) label.visible = label.position.distanceToSquared(camera.position) < maxDistanceSq;
             renderer.render(scene, camera);
         };
         animate();
@@ -384,7 +496,7 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
         renderer.domElement.addEventListener("pointermove", onMove);
         renderer.domElement.addEventListener("pointerleave", onLeave);
 
-        sceneRef.current = { scene, camera, renderer, controls, objects: [], pickables: [], framed: false };
+        sceneRef.current = { scene, camera, renderer, controls, objects: [], pickables: [], machineLabels: [], framed: false };
         return () => {
             cancelAnimationFrame(frame);
             observer.disconnect();
@@ -402,14 +514,16 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
         const s = sceneRef.current;
         if (!s) return;
         byUid.current = new Map(placements.map((p) => [p.uid, p]));
+        const disposed = new Set<THREE.Material>();
         s.objects.forEach((o) => {
             s.scene.remove(o);
-            disposeObject(o);
+            disposeObject(o, disposed);
         });
 
         const error = new THREE.Color("#e05555");
         const selectedColor = new THREE.Color("#f0d078");
         const solid: Box[] = [];
+        const machines: Box[] = [];
         const supports: Box[] = [];
         for (const p of placements) {
             const support = isSupport(p);
@@ -418,26 +532,31 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
             // Highlighting an item fades everything else into the background
             if (highlightItem && carriedItem(p) !== highlightItem) base = base.clone().lerp(new THREE.Color("#120d1c"), 0.82);
             const color = p.uid === selectedUid ? selectedColor : issuesByUid.get(p.uid)?.length ? base.clone().lerp(error, 0.6) : base;
-            (support ? supports : solid).push(...boxesFor(p, color, cutLevel));
+            (support ? supports : isMachine(p) ? machines : solid).push(...boxesFor(p, color, cutLevel));
         }
 
         const solidMesh = instancedMesh(solid, new THREE.MeshLambertMaterial());
+        const machineMesh = instancedMesh(machines, new THREE.MeshLambertMaterial({ vertexColors: true }), true);
         const supportMesh = instancedMesh(supports, new THREE.MeshLambertMaterial());
         const outlines = machineOutlines(placements, cutLevel);
         const labels = showLabels ? blockLabels(tiers, io, placements, ports) : [];
+        const perMachine = showLabels ? machineLabels(placements, cutLevel, itemColors, highlightItem) : [];
         const arrows = showPorts ? [arrowMesh(portArrows(placements, ports, cutLevel))] : [];
-        s.objects = [solidMesh, supportMesh, outlines, ...arrows, ...labels];
+        s.objects = [solidMesh, machineMesh, supportMesh, outlines, ...arrows, ...labels, ...perMachine];
         s.objects.forEach((o) => s.scene.add(o));
+        s.machineLabels = perMachine;
         s.pickables = [
             { mesh: solidMesh, owners: solid.map((b) => b.uid) },
+            { mesh: machineMesh, owners: machines.map((b) => b.uid) },
             { mesh: supportMesh, owners: supports.map((b) => b.uid) },
         ];
 
         // Frame the camera on the first non-empty layout
-        if (!s.framed && solid.length > 0) {
-            const maxX = Math.max(...solid.map((b) => b.x + b.w));
-            const maxY = Math.max(...solid.map((b) => b.y + b.d));
-            const maxZ = Math.max(...solid.map((b) => b.z + b.h));
+        const visible = [...solid, ...machines];
+        if (!s.framed && visible.length > 0) {
+            const maxX = Math.max(...visible.map((b) => b.x + b.w));
+            const maxY = Math.max(...visible.map((b) => b.y + b.d));
+            const maxZ = Math.max(...visible.map((b) => b.z + b.h));
             const center = new THREE.Vector3(maxX / 2, maxZ / 2, maxY / 2);
             const radius = Math.max(maxX, maxY, maxZ);
             s.controls.target.copy(center);
@@ -463,7 +582,7 @@ export function View3D({ placements, tiers, io, ports, itemColors, highlightItem
                     ports: <span style={{ color: "#5dd97a" }}>▲ input</span> <span style={{ color: "#f0a040" }}>▲ output</span>{" "}
                     <span style={{ color: "#e05555" }}>▲ not connected</span> · light cones: belt direction
                 </span>
-                <span>drag orbit · right-drag pan · scroll zoom · hover for names</span>
+                <span>drag orbit · right-drag pan · scroll zoom · hover for names · zoom in to see what each machine makes</span>
             </div>
         </div>
     );
