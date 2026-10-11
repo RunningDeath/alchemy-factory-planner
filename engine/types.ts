@@ -166,6 +166,8 @@ export interface BuildLayoutState {
   io?: IoPoint[];
   /** Unused output that isn't sent out (the player can choose to export it) */
   surplus?: { itemName: string; rate: number }[];
+  /** Plan the module was generated for (steps and machine counts), to notice when it changed */
+  planKey?: string;
 }
 
 export interface FactoryState {

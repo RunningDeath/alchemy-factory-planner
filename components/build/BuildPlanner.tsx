@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cycleVariant, inferBeltItems, placeBuilding, placementsAt, removePlacement } from "../../engine/build/edit";
-import { DEFAULT_MODULE_OPTIONS, generateModule, moduleTooBig } from "../../engine/build/generator";
+import { DEFAULT_MODULE_OPTIONS, moduleTooBig, type ModuleStep } from "../../engine/build/generator";
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
 import { lockedBuildings } from "../../engine/build/unlocks";
 import type { BuildLayoutState } from "../../engine/types";
 import { BELT_COLORS, buildingName, carriedItem, itemColorMap } from "../../lib/buildCatalog";
 import { ExportBlueprintDialog } from "./ExportBlueprintDialog";
+import { GenerateProgress } from "./GenerateProgress";
+import type { GenerateMessage, GenerateRequest } from "./generate.worker";
 import { ItemLegend } from "./ItemLegend";
 import { useFactoryStore } from "../../store/useFactoryStore";
 import { BuildInfoPanel } from "./BuildInfoPanel";
@@ -43,6 +45,11 @@ function HoverInfo({ placements }: { placements: Placement[] }) {
 }
 const HISTORY_LIMIT = 50;
 
+/** Identifies the plan a module was generated for: its steps and machine counts */
+function planKeyOf(steps: ModuleStep[]): string {
+    return steps.map((s) => `${s.nodeKey}:${s.machines}`).join("|");
+}
+
 export function BuildPlanner() {
     const factory = useFactoryStore((s) => s.factories.find((f) => f.id === s.activeFactoryId));
     const setBuildLayout = useFactoryStore((s) => s.setBuildLayout);
@@ -65,6 +72,8 @@ export function BuildPlanner() {
     const [showPorts, setShowPorts] = useState(true);
     const [hoverCell, setHoverCell] = useState<[number, number] | null>(null);
     const [message, setMessage] = useState<string | null>(null);
+    const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
+    const worker = useRef<Worker | null>(null);
 
     const undoStack = useRef<BuildLayoutState[]>([]);
     const redoStack = useRef<BuildLayoutState[]>([]);
@@ -131,19 +140,46 @@ export function BuildPlanner() {
             );
             return;
         }
-        // Routing takes a moment: show that before the browser is busy
-        setMessage("Generating module and routing belts…");
-        setTimeout(() => {
-            // Final products always leave at the edge; surplus only if the player chose it
-            const finalProducts = report.targets.map((t) => t.itemName);
-            const mod = generateModule(steps, { ...opts, beltSpeed: report.beltSpeed, finalProducts, unlocks });
-            commit({ placements: mod.placements, options: opts, tiers: mod.tiers, routes: mod.routes, io: mod.io, surplus: mod.surplus });
+        // Layout and routing run in a worker: the page stays usable and shows progress
+        worker.current?.terminate();
+        const w = new Worker(new URL("./generate.worker.ts", import.meta.url));
+        worker.current = w;
+        setMessage(null);
+        setProgress({ fraction: 0, label: "Starting" });
+        w.onmessage = (event: MessageEvent<GenerateMessage>) => {
+            const msg = event.data;
+            if (msg.type === "progress") {
+                setProgress({ fraction: msg.fraction, label: msg.label });
+                return;
+            }
+            w.terminate();
+            worker.current = null;
+            setProgress(null);
+            if (msg.type === "error") {
+                setMessage(`Generating failed: ${msg.message}`);
+                return;
+            }
+            const mod = msg.module;
+            commit({ placements: mod.placements, options: opts, tiers: mod.tiers, routes: mod.routes, io: mod.io, surplus: mod.surplus, planKey: planKeyOf(steps) });
             const failed = mod.routes.filter((r) => !r.ok).length;
             flash(failed ? `${failed} belt connection${failed === 1 ? "" : "s"} could not be routed` : `All ${mod.routes.length} belt connections routed`);
             setLevel(0);
             setSelectedUid(null);
-        }, 30);
+        };
+        // Final products always leave at the edge; surplus only if the player chose it
+        const request: GenerateRequest = { steps, options: { ...opts, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks } };
+        w.postMessage(request);
     };
+
+    const abortGenerate = () => {
+        worker.current?.terminate();
+        worker.current = null;
+        setProgress(null);
+        flash("Generating aborted");
+    };
+
+    // A running generation doesn't outlive the view
+    useEffect(() => () => worker.current?.terminate(), []);
 
     const handleGenerate = () => {
         if (placements.length > 0 && !window.confirm("Replace the current layout with a generated module?")) return;
@@ -309,6 +345,11 @@ export function BuildPlanner() {
                             <span>Pick a building on the left. Click selects, right-click removes. Q/E change level.</span>
                         )}
                         {message && <span className="text-[var(--warning)] font-semibold">{message}</span>}
+                        {layout?.planKey && placements.length > 0 && layout.planKey !== planKeyOf(steps) && (
+                            <span className="text-[var(--warning)]" title="The production plan (targets, options such as the cauldron, research) changed after this module was generated">
+                                Plan changed since this module was generated: generate again
+                            </span>
+                        )}
                         {locked.length > 0 && (
                             <span className="text-[var(--warning)]" title="Not unlocked at your level (see Unlocks). The game won't place a blueprint with these.">
                                 Locked: {locked.join(", ")}

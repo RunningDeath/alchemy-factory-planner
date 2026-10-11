@@ -228,7 +228,7 @@ export function FactorySettingsPanel({
                 <div>
                     <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 flex items-center tracking-wide">
                         Cauldron
-                        <InfoTooltip text="The cauldron turns any three materials into one, picked by their cauldron values. Where that takes fewer steps than the usual chain, the plan uses it instead (cheapest mix wins)." />
+                        <InfoTooltip text="The cauldron turns any three materials into one, picked by their cauldron values. Where that takes fewer steps than the usual chain, the plan uses it instead (cheapest mix wins). Plans with the cauldron always use the LP planner." />
                     </label>
                     <div className="flex flex-col gap-1.5">
                         <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)] transition-colors">

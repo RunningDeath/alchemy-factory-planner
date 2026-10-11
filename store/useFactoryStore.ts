@@ -95,7 +95,8 @@ function computeFactory(factory: FactoryData, research: ResearchState) {
         selfFertilizer: factory.config.selfFertilizer,
     };
 
-    const productionTrees = factory.plannerMode === "lp"
+    // Only the LP planner knows cauldron recipes
+    const productionTrees = factory.plannerMode === "lp" || calculationConfig.useCauldron
         ? calculateProductionLP(calculationConfig)
         : calculateProduction(calculationConfig);
 

@@ -79,6 +79,8 @@ export interface ModuleOptions {
     unlocks?: BuildUnlocks;
     /** Put small blocks on top of others to save floor (default: yes) */
     stackBlocks?: boolean;
+    /** Progress while laying out and routing: share done (0–1) and what is happening */
+    onProgress?: (fraction: number, label: string) => void;
 }
 
 /** One storey: walls and pillars are 16 cells high */
@@ -360,6 +362,8 @@ function* tierShapes(step: ModuleStep, fp: BuildingFootprint, rot: Rotation, sta
 
 /** Smallest footprint for n machines, or the biggest shape when n doesn't fit in one block */
 const MIN_PER_DECK_LEVEL = 2;
+/** Machines this big (nurseries) stack one a level anyway: each level saves a lot of floor */
+const BIG_MACHINE_FLOOR = 9;
 
 function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Rotation, stacking: Stacking, opts: ModuleOptions): TierShape {
     const { y: sy } = rotatedSize(fp, rot);
@@ -371,9 +375,9 @@ function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Ro
         const capacity = shape.columns * shape.rows * shape.levels;
         if (!biggest || capacity > biggest.columns * biggest.rows * biggest.levels) biggest = shape;
         if (capacity < n) continue;
-        // A beam deck with its pillars and raised lanes isn't worth it for one machine a level
+        // A beam deck with its pillars and raised lanes isn't worth it for one small machine a level
         // (the block can still go on top of another one as a whole)
-        if (shape.deck && n < shape.levels * MIN_PER_DECK_LEVEL) continue;
+        if (shape.deck && n < shape.levels * MIN_PER_DECK_LEVEL && rotatedSize(fp, rot).x * sy < BIG_MACHINE_FLOOR) continue;
         // Trim rows to what n needs
         const rows = Math.ceil(n / (shape.columns * shape.levels));
         const trimmed = { ...shape, rows, depth: blockDepth(rows, sy, shape.rowPitch, step.heating) + filterRows(step) };
@@ -903,9 +907,9 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
     const steam = heating.kind === "steam";
     const baseZ = steam ? PLATFORM_HEIGHT.steam : PLATFORM_HEIGHT.stove;
     const pitch = fp.size.z;
-    const maxColumns = Math.max(1, Math.floor((opts.maxWidth - 1) / CAULDRON_PITCH));
     const maxLevels = can.lifts ? Math.max(1, Math.min(opts.maxStack, Math.floor((opts.maxHeight - baseZ - 1) / pitch))) : 1;
-    const levels = Math.min(maxLevels, Math.ceil(count / Math.min(count, maxColumns)));
+    // Stack first (cauldrons share the heat below), then add columns
+    const levels = Math.min(maxLevels, count);
     const columns = Math.ceil(count / levels);
 
     // Ports by side: which input item each one takes (an item used twice takes two ports)
@@ -944,7 +948,8 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
             const portZ = z + 1;
             portItems.forEach((flow, k) => {
                 const { side, dx, dy } = inSides[k];
-                const piece = beltPieceFor([oppositeSide(side)], [side])!;
+                // The stub sits on the port's side and runs into the cauldron
+                const piece = beltPieceFor([side], [oppositeSide(side)])!;
                 stubs.push({
                     uid: nextUid("b"), id: piece.id, x: x + dx, y: y + dy, z: portZ, rot: piece.rot, lane: "in", label: flow.itemName, nodeKey: step.nodeKey,
                     laneEnd: { kind: "in", items: [{ itemName: flow.itemName, rate: flow.perMachineRate }] },
@@ -1117,10 +1122,16 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
               );
     // Stacked towers first; side by side only when the towers can't be belted together
     const layouts = towers.length < singles.length ? [towers, singles] : [singles];
+    const total = layouts.length * attempts.length;
+    let attempt = 0;
     for (const set of layouts) {
         const setFlow = towerFlow(set, flow);
         for (const [corridor, mode] of attempts) {
-            const result = layOut(blocks, set, setFlow, corridor, mode, options, can);
+            const label = `Layout ${attempt + 1} of up to ${total}${set === towers && towers !== singles ? " (stacked)" : ""}: routing belts`;
+            const base = attempt++;
+            const onProgress = options.onProgress && ((f: number) => options.onProgress!((base + f) / total, label));
+            onProgress?.(0);
+            const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can);
             if (!best || score(result) < score(best)) best = result;
             // Both layouts of a corridor width get a chance before settling
             if (mode === "flow" && best.routes.every((r) => r.ok)) break;
@@ -1128,6 +1139,7 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         if (best?.routes.every((r) => r.ok)) break;
     }
     best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
+    options.onProgress?.(1, "Done");
     return best!;
 }
 
@@ -1193,6 +1205,7 @@ function layOut(
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
         ? routeModule(blockPlacements, {
+              onProgress: options.onProgress && ((f) => options.onProgress!(f, "")),
               beltSpeed: options.beltSpeed,
               margin: ROUTING_MARGIN,
               maxHeight: options.maxHeight,

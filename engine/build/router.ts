@@ -72,6 +72,8 @@ export interface RouterOptions {
     lifts?: boolean;
     /** Priority splitters put consumers before the export (default: yes) */
     prioritySplitters?: boolean;
+    /** Share of the routing done (0–1), reported as connections are routed */
+    onProgress?: (fraction: number) => void;
 }
 
 const PRIORITY_SPLITTER = "splitter-vert";
@@ -275,8 +277,10 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
     let best: RoutingOutput | null = null;
     let priority: string[] = [];
     const failed = (r: RoutingOutput) => r.routes.filter((x) => !x.ok);
-    for (let pass = 0; pass < 3; pass++) {
-        const result = routeOnce(placements, options, priority);
+    const passes = 3;
+    for (let pass = 0; pass < passes; pass++) {
+        const report = options.onProgress;
+        const result = routeOnce(placements, { ...options, onProgress: report && ((f) => report((pass + f) / passes)) }, priority);
         if (!best || failed(result).length < failed(best).length) best = result;
         if (failed(best).length === 0) break;
         priority = [...new Set([...failed(result).map((r) => r.key!), ...priority])];
@@ -647,7 +651,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     };
     connections.sort((a, b) => rank(a) - rank(b) || distance(a) - distance(b));
 
-    for (const conn of connections) {
+    for (const [done, conn] of connections.entries()) {
+        options.onProgress?.(done / connections.length);
         const sourceId = conn.from === "import" ? `import:${conn.itemName}` : conn.from.uid;
         const sinkId = conn.to === "export" ? `export:${conn.itemName}` : conn.to.uid;
         const starts: Start[] = [];
