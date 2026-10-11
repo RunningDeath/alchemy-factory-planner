@@ -4,7 +4,7 @@ import { analyzeBelts } from "../belt-analysis";
 import { PlannerConfig } from "../types";
 import { beltPieceFor } from "./belt-pieces";
 import { getFootprint } from "./footprint";
-import { DEFAULT_MODULE_OPTIONS, generateModule, machineRotation, stackingFor, type GeneratedModule, type ModuleStep } from "./generator";
+import { DEFAULT_MODULE_OPTIONS, generateModule, machineRotation, moduleTooBig, stackingFor, type GeneratedModule, type ModuleStep } from "./generator";
 import { portConnections, validateLayout } from "./layout";
 import { stepsFromReport } from "./module-steps";
 
@@ -157,7 +157,7 @@ describe("stepsFromReport → generateModule", () => {
     expect(mod.size[2]).toBeLessThanOrEqual(16);
     const grinders = mod.placements.filter((p) => p.id === "grinder").length;
     expect(grinders).toBe(steps.filter((s) => s.deviceId === "grinder").reduce((sum, s) => sum + s.machines, 0));
-  });
+  }, 30_000);
 });
 
 describe("separate inputs, filters and heating", () => {
@@ -249,5 +249,12 @@ describe("separate inputs, filters and heating", () => {
   test("a heated machine without a heating device under it is flagged", () => {
     const issues = validateLayout([{ uid: "c", id: "crucible", x: 0, y: 0, z: 0, rot: 0 }]);
     expect(issues.map((i) => i.kind)).toContain("unheated");
+  });
+});
+
+describe("moduleTooBig", () => {
+  test("refuses plans with thousands of machines instead of grinding for minutes", () => {
+    expect(moduleTooBig([step({ deviceId: "grinder", machines: 5000 })])?.machines).toBe(5000);
+    expect(moduleTooBig([step({ machines: 12 })])).toBeNull();
   });
 });

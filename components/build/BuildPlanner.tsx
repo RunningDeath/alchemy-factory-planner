@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cycleVariant, inferBeltItems, placeBuilding, placementsAt, removePlacement } from "../../engine/build/edit";
-import { DEFAULT_MODULE_OPTIONS, generateModule } from "../../engine/build/generator";
+import { DEFAULT_MODULE_OPTIONS, generateModule, moduleTooBig } from "../../engine/build/generator";
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
 import type { BuildLayoutState } from "../../engine/types";
@@ -120,6 +120,13 @@ export function BuildPlanner() {
 
     const runGenerate = (opts: typeof options) => {
         if (!report || steps.length === 0) return;
+        const tooBig = moduleTooBig(steps);
+        if (tooBig) {
+            setMessage(
+                `This plan needs ${tooBig.machines.toLocaleString()} machines (${Math.ceil(tooBig.biggest.machines).toLocaleString()}× ${buildingName(tooBig.biggest.deviceId)} for ${tooBig.biggest.itemName}) - too many for one module. Lower the rate or split the plan.`,
+            );
+            return;
+        }
         // Routing takes a moment: show that before the browser is busy
         setMessage("Generating module and routing belts…");
         setTimeout(() => {

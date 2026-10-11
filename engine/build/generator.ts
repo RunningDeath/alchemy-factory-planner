@@ -74,6 +74,17 @@ export interface ModuleOptions {
 /** One storey: walls and pillars are 16 cells high */
 export const STOREY_HEIGHT = 16;
 
+/** More machines than this is not one module (it would take minutes and fill a map) */
+export const MAX_MODULE_MACHINES = 2000;
+
+/** Why a plan is too big for one module, or null when it fits */
+export function moduleTooBig(steps: ModuleStep[]): { machines: number; biggest: ModuleStep } | null {
+    const machines = steps.reduce((sum, st) => sum + Math.ceil(st.machines), 0);
+    if (machines <= MAX_MODULE_MACHINES) return null;
+    const biggest = steps.reduce((a, b) => (b.machines > a.machines ? b : a));
+    return { machines, biggest };
+}
+
 export const DEFAULT_MODULE_OPTIONS: Omit<ModuleOptions, "beltSpeed"> = {
     maxWidth: 32,
     maxDepth: 32,
@@ -968,12 +979,9 @@ function layOut(
         const size = fp ? rotatedSize(fp, p.rot) : { x: 1, y: 1, z: 1 };
         return [p.x, p.y, p.z, p.x + size.x, p.y + size.y, p.z + size.z];
     });
+    const extent = (i: number, pick: (a: number, b: number) => number) => cells.reduce((acc, c) => pick(acc, c[i]), pick === Math.max ? -Infinity : Infinity);
     const size: [number, number, number] = cells.length
-        ? [
-              Math.max(...cells.map((c) => c[3])) - Math.min(...cells.map((c) => c[0])),
-              Math.max(...cells.map((c) => c[4])) - Math.min(...cells.map((c) => c[1])),
-              Math.max(...cells.map((c) => c[5])),
-          ]
+        ? [extent(3, Math.max) - extent(0, Math.min), extent(4, Math.max) - extent(1, Math.min), extent(5, Math.max)]
         : [0, 0, 0];
     return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io, surplus: routed.surplus };
 }

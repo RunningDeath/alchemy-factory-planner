@@ -288,11 +288,20 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const makeUid = (prefix: string) => `r${prefix}-${++uidCounter}`;
 
     // Routing area: the module plus a margin
-    const cells = all.flatMap(placementCells);
-    const minX = Math.min(...cells.map((c) => c.x)) - options.margin;
-    const maxX = Math.max(...cells.map((c) => c.x)) + options.margin;
-    const minY = Math.min(...cells.map((c) => c.y)) - options.margin;
-    const maxY = Math.max(...cells.map((c) => c.y)) + options.margin;
+    // (a loop: big modules have too many cells for Math.min(...cells))
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of all) {
+        for (const c of placementCells(p)) {
+            if (c.x < minX) minX = c.x;
+            if (c.x > maxX) maxX = c.x;
+            if (c.y < minY) minY = c.y;
+            if (c.y > maxY) maxY = c.y;
+        }
+    }
+    minX -= options.margin;
+    maxX += options.margin;
+    minY -= options.margin;
+    maxY += options.margin;
     const maxZ = Math.max(1, options.maxHeight - 1);
     // Middle of the module: routes are pulled slightly inward, along the other belts
     const centerX = (minX + maxX) / 2;
