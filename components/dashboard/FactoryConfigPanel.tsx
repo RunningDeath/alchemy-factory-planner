@@ -133,8 +133,8 @@ export function FactorySettingsPanel({
     ];
 
     const plannerOptions = [
-        { value: "recursive", label: "Recursive (Tree-based)" },
-        { value: "lp", label: "Matrix (Linear Programming)" },
+        { value: "lp", label: "Best mix (recommended)" },
+        { value: "recursive", label: "Simple tree (default recipes only)" },
     ];
 
     const fertilizerOptions = [
@@ -269,8 +269,8 @@ export function FactorySettingsPanel({
 
                 <div>
                     <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 flex items-center tracking-wide">
-                        Planner Algorithm
-                        <InfoTooltip text="Matrix (LP) is WIP but will be preferred. Recursive will be deprecated." />
+                        Planner
+                        <InfoTooltip text="Best mix: looks at all recipes at once (alternatives, byproducts, cauldron) and picks the cheapest combination for the whole plan. Simple tree: follows each item's default recipe from the target down, one branch at a time; no alternatives or cauldron." />
                     </label>
                     <SearchableSelect
                         options={plannerOptions}
@@ -279,6 +279,9 @@ export function FactorySettingsPanel({
                         placeholder="Select Planner..."
                         className="w-full bg-[var(--background-deep)] border border-[var(--border-subtle)] rounded-lg px-3 py-2 text-xs text-[var(--text-secondary)] hover:border-[var(--border)]"
                     />
+                    {config.useCauldron && activeFactory.plannerMode === "recursive" && (
+                        <p className="mt-1 text-[10px] text-[var(--text-muted)]">The cauldron needs the best-mix planner, so it is used while the cauldron is on.</p>
+                    )}
                 </div>
             </div>
         </OrnatePanel>

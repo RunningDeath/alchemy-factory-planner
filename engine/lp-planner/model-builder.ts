@@ -60,6 +60,8 @@ export function buildLPModel(
   const fertilizerId = ctx.selectedFertilizer ? normalizeItemId(ctx.selectedFertilizer) : null;
 
   const machineCost = new Map<string, number>();
+  // Targets are always made here, even when the same item is bought as fuel or fertilizer
+  const targetIds = new Set((config.targets?.length ? config.targets : config.targetItem ? [{ item: config.targetItem }] : []).map((t) => normalizeItemId(t.item)));
 
   // Build item flow coefficients for each recipe
   recipesFor(ctx).forEach((recipe) => {
@@ -73,7 +75,8 @@ export function buildLPModel(
       return outputId === fertilizerId;
     });
 
-    if (recipeProducesFuel || recipeProducesFertilizer) {
+    const producesTarget = recipe.outputs.some((output) => targetIds.has(output.id || normalizeItemId(output.name)));
+    if ((recipeProducesFuel || recipeProducesFertilizer) && !producesTarget) {
       return; // Skip this recipe
     }
 
@@ -273,10 +276,10 @@ export function buildLPModel(
     const fuelId = normalizeItemId(ctx.selectedFuel);
     const fertilizerId = ctx.selectedFertilizer ? normalizeItemId(ctx.selectedFertilizer) : null;
 
-    if (!ctx.selfFuel && itemName === fuelId) {
+    if (!ctx.selfFuel && itemName === fuelId && !isTarget) {
       isRawMaterial = true;
     }
-    if (!ctx.selfFertilizer && fertilizerId && itemName === fertilizerId) {
+    if (!ctx.selfFertilizer && fertilizerId && itemName === fertilizerId && !isTarget) {
       isRawMaterial = true;
     }
 
