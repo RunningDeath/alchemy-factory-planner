@@ -101,7 +101,8 @@ describe("routeModule via generateModule", () => {
     const mod = generateModule(stepsFromReport(report), { ...options, beltSpeed: report.beltSpeed });
     expectFullyConnected(mod);
     expect(mod.io.some((p) => p.kind === "export" && p.itemName === "Bandage")).toBe(true);
-    expect(mod.io.some((p) => p.kind === "import" && p.itemName === "Growth Potion")).toBe(true);
+    // One fertilizer input for the whole module: the second nursery block branches off the first import
+    expect(mod.io.filter((p) => p.kind === "import" && p.itemName === "Growth Potion")).toHaveLength(1);
     expect(mod.size[2]).toBeLessThanOrEqual(16);
   }, 30_000);
 });

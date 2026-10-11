@@ -249,7 +249,12 @@ interface Start {
     branchFrom?: RouteNode;
     /** Module edge import */
     edge?: boolean;
+    /** Added to the path cost when starting here */
+    extra?: number;
 }
+
+/** Starting a second import of an item that could branch off the first costs this much more */
+const EXTRA_IMPORT_COST = 40;
 
 type Goal =
     | { kind: "entry"; end: LaneEnd }
@@ -352,7 +357,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             if (s.branchFrom && !beltFree(s.cell)) continue;
             for (const heading of SIDES) {
                 if (heading === s.inSide) continue;
-                const cost = beltCost(s.cell, heading !== oppositeSide(s.inSide));
+                const base = beltCost(s.cell, heading !== oppositeSide(s.inSide));
+                const cost = base === null ? null : base + (s.extra ?? 0);
                 if (cost === null) continue;
                 const node: SearchNode = { cell: s.cell, heading, g: cost, f: cost + h(s.cell), parent: null, step: { kind: "belt", cell: s.cell, inSide: s.inSide, outSide: heading } };
                 (node as SearchNode & { start?: Start }).start = s;
@@ -631,17 +637,21 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         let tree: string | undefined;
 
         if (conn.from === "import") {
-            // Join an import of this item that still has room, or start a new one at the edge
+            // Join an import of this item that still has room (one input per item for the whole
+            // module); a new import at the edge only when that's far cheaper or there is none
+            let joinable = false;
             for (const n of nodes.values()) {
                 if (n.lift || n.items.size !== 1 || !n.items.has(conn.itemName) || !n.tree?.startsWith("import:")) continue;
                 if ((treeTotals.get(n.tree) ?? 0) + conn.rate > options.beltSpeed + 1e-6) continue;
+                joinable = true;
                 for (const side of SIDES) if (canAdd(n, side, "out")) starts.push({ cell: add(n.cell, side), inSide: oppositeSide(side), branchFrom: n });
             }
+            const extra = joinable ? EXTRA_IMPORT_COST : 0;
             for (let x = minX; x <= maxX; x++) {
-                starts.push({ cell: [x, minY, 0], inSide: "up", edge: true }, { cell: [x, maxY, 0], inSide: "down", edge: true });
+                starts.push({ cell: [x, minY, 0], inSide: "up", edge: true, extra }, { cell: [x, maxY, 0], inSide: "down", edge: true, extra });
             }
             for (let y = minY + 1; y < maxY; y++) {
-                starts.push({ cell: [minX, y, 0], inSide: "left", edge: true }, { cell: [maxX, y, 0], inSide: "right", edge: true });
+                starts.push({ cell: [minX, y, 0], inSide: "left", edge: true, extra }, { cell: [maxX, y, 0], inSide: "right", edge: true, extra });
             }
         } else {
             const from = conn.from;
