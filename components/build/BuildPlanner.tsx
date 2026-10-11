@@ -7,6 +7,7 @@ import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, typ
 import { stepsFromReport } from "../../engine/build/module-steps";
 import type { BuildLayoutState } from "../../engine/types";
 import { BELT_COLORS, buildingName, carriedItem, itemColorMap } from "../../lib/buildCatalog";
+import { ExportBlueprintDialog } from "./ExportBlueprintDialog";
 import { ItemLegend } from "./ItemLegend";
 import { useFactoryStore } from "../../store/useFactoryStore";
 import { BuildInfoPanel } from "./BuildInfoPanel";
@@ -70,6 +71,7 @@ export function BuildPlanner() {
     const steps = useMemo(() => (report ? stepsFromReport(report) : []), [report]);
     const stepIndex = useMemo(() => new Map(steps.map((s, i) => [s.nodeKey, i])), [steps]);
     const [highlightItem, setHighlightItem] = useState<string | null>(null);
+    const [exporting, setExporting] = useState(false);
 
     const occupancy = useMemo(() => buildOccupancy(placements), [placements]);
     const issues = useMemo(() => placements.flatMap((p) => placementIssues(p, occupancy)), [placements, occupancy]);
@@ -234,6 +236,15 @@ export function BuildPlanner() {
 
     return (
         <div className="flex flex-col h-[calc(100vh-2rem)] min-h-[680px]">
+            {exporting && (
+                <ExportBlueprintDialog
+                    placements={placements}
+                    itemColors={itemColors}
+                    defaultTitle={`${factory.name}: ${report?.targets.map((t) => t.itemName).join(", ") || "module"}`}
+                    mainItem={report?.targets[0]?.itemName}
+                    onClose={() => setExporting(false)}
+                />
+            )}
             <BuildToolbar
                 options={options}
                 onOptionsChange={(next) => factory && setBuildLayout(factory.id, { ...(layout ?? { placements: [] }), options: next })}
@@ -259,6 +270,7 @@ export function BuildPlanner() {
                 onShowPortsChange={setShowPorts}
                 onUndo={undo}
                 onRedo={redo}
+                onExport={() => (placements.length > 0 ? setExporting(true) : flash("Nothing to export yet"))}
             />
             <div className="flex flex-1 min-h-0">
                 <aside className="w-56 shrink-0 border-r border-[var(--border)] p-3 overflow-y-auto custom-scrollbar">

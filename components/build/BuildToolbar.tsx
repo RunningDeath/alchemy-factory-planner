@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, FlipHorizontal2, Redo2, RotateCw, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, FlipHorizontal2, Redo2, RotateCw, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import type { ModuleOptions } from "../../engine/build/generator";
 import { buildingName } from "../../lib/buildCatalog";
 import { cn } from "../../lib/utils";
@@ -34,6 +34,7 @@ interface BuildToolbarProps {
     onShowPortsChange: (show: boolean) => void;
     onUndo: () => void;
     onRedo: () => void;
+    onExport: () => void;
 }
 
 const buttonClass =
@@ -108,6 +109,9 @@ export function BuildToolbar(props: BuildToolbarProps) {
             </button>
             <button onClick={props.onClear} className={buttonClass} title="Remove everything">
                 <Trash2 size={12} />
+            </button>
+            <button onClick={props.onExport} className={buttonClass} title="Download the layout as a blueprint file for the game">
+                <Download size={12} /> Blueprint
             </button>
 
             <div className="flex-1" />
