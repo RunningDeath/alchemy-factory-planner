@@ -60,9 +60,19 @@ describe("validateLayout", () => {
     expect(validateLayout(layout)).toEqual([]);
   });
 
-  test("a metal stand straddles a nursery and carries the next nursery", () => {
-    // Stand legs sit in the nursery's cut corners at z 1-2, its top at z 3 above the nursery's partial top
-    const layout = [place("nursery", 0, 0, 0), place("metal-stand", 0, 0, 1), place("nursery", 0, 0, 4)];
+  test("machines carry nothing except grinder-sized ones: no metal stand on a nursery", () => {
+    const layout = [place("nursery", 0, 0, 0), place("metal-stand", 0, 0, 1)];
+    expect(validateLayout(layout).some((i) => i.kind === "unsupported")).toBe(true);
+  });
+
+  test("an assembler may rest partly on a grinder and partly on lab stands (as in player blueprints)", () => {
+    const layout = [
+      place("grinder", 0, 0, 0),
+      place("frame-single", 1, 0, 0),
+      place("frame-single", 0, 1, 0),
+      place("frame-single", 1, 1, 0),
+      place("assembler", 0, 0, 1),
+    ];
     expect(validateLayout(layout)).toEqual([]);
   });
 

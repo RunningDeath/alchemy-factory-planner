@@ -98,14 +98,12 @@ export function isDirectlyStackable(fp: BuildingFootprint): boolean {
 const MACHINE_CATEGORIES = new Set(["production", "portal", "storage"]);
 
 /**
- * Whether `supporter` can carry `supported` on top. Machines never stand on other
- * machines (players use lab stands, beams, wood blocks or the stove), except
- * grinder-sized machines, which stack directly. Matches the player blueprints.
+ * Whether `supporter` can carry what stands on it. Of the machines only grinder-sized
+ * ones carry anything; player blueprints rest machines on grinders (fully or partly),
+ * lab stands, beams, wood blocks and the stove, never on other machines.
  */
-export function canSupport(supporter: BuildingFootprint, supported: BuildingFootprint): boolean {
-    if (!MACHINE_CATEGORIES.has(supporter.category)) return true;
-    if (!MACHINE_CATEGORIES.has(supported.category)) return true;
-    return isDirectlyStackable(supporter) && isDirectlyStackable(supported);
+export function canSupport(supporter: BuildingFootprint): boolean {
+    return !MACHINE_CATEGORIES.has(supporter.category) || isDirectlyStackable(supporter);
 }
 
 /** Ports in local (rotated) coordinates */

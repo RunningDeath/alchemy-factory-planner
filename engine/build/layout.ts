@@ -99,9 +99,8 @@ export function placementIssues(p: Placement, occupancy: Map<string, WorldCell[]
         // Only the bottom of each column needs support; cells above rest on the building itself
         if (!unsupported && c.foundation && c.z > 0 && !own.has(cellKey(c.x, c.y, c.z - 1))) {
             const below = occupancy.get(cellKey(c.x, c.y, c.z - 1)) ?? [];
-            const self = getFootprint(p.id)!;
             const supported = below.some(
-                (b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0 && canSupport(getFootprint(b.id)!, self),
+                (b) => b.uid !== p.uid && b.stackable && (b.quads & c.quads) !== 0 && canSupport(getFootprint(b.id)!),
             );
             if (!supported) unsupported = { kind: "unsupported", uid: p.uid, cell: [c.x, c.y, c.z] };
         }
