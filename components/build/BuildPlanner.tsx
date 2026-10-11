@@ -188,8 +188,8 @@ export function BuildPlanner() {
 
     /** Send an item's surplus out at the edge (via a priority splitter) or keep it in the line, then lay out again */
     const toggleExport = (itemName: string, on: boolean) => {
-        const kept = options.keepItems ?? [];
-        runGenerate({ ...options, keepItems: on ? kept.filter((i) => i !== itemName) : [...new Set([...kept, itemName])] });
+        const chosen = options.exportItems ?? [];
+        runGenerate({ ...options, exportItems: on ? [...new Set([...chosen, itemName])] : chosen.filter((i) => i !== itemName) });
     };
 
     const handlePlace = (pending: Placement[]) => {
@@ -412,7 +412,6 @@ export function BuildPlanner() {
                         routes={layout?.routes ?? []}
                         io={layout?.io ?? []}
                         surplus={layout?.surplus ?? []}
-                        keepItems={options.keepItems ?? []}
                         finalProducts={report?.targets.map((t) => t.itemName) ?? []}
                         onToggleExport={toggleExport}
                         onSelect={setSelectedUid}

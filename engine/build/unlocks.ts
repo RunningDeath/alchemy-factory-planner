@@ -49,6 +49,9 @@ export const OPTIONAL_BUILDINGS = [
     { id: "splitter-vert", label: "Priority Splitters", what: "consumers first, surplus to the edge" },
     { id: "steam-heater", label: "Steam Heating Pads", what: "heating with steam" },
     { id: "stone-stove", label: "Stone Furnaces", what: "heating with fuel" },
+    { id: "knowledge-altar", label: "Knowledge Altars", what: "turning byproducts nobody needs into knowledge" },
+    { id: "junk-barrel", label: "Trash Barrels", what: "throwing away byproducts nobody needs" },
+    { id: "dispatch-portal", label: "Dispatch Portals", what: "selling byproducts nobody needs" },
 ] as const;
 
 /** What the generator may use */
@@ -61,6 +64,9 @@ export interface Capabilities {
     prioritySplitters: boolean;
     steam: boolean;
     stoves: boolean;
+    trash: boolean;
+    sell: boolean;
+    altar: boolean;
 }
 
 export function capabilities(unlocks?: BuildUnlocks): Capabilities {
@@ -74,6 +80,9 @@ export function capabilities(unlocks?: BuildUnlocks): Capabilities {
         prioritySplitters: can("splitter-vert"),
         steam: can("steam-heater"),
         stoves: can("stone-stove"),
+        trash: can("junk-barrel"),
+        sell: can("dispatch-portal"),
+        altar: can("knowledge-altar"),
     };
 }
 

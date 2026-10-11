@@ -82,6 +82,20 @@ export function BuildToolbar(props: BuildToolbarProps) {
                 <input type="checkbox" checked={options.stackBlocks !== false} onChange={(e) => onOptionsChange({ ...options, stackBlocks: e.target.checked })} className="accent-[var(--accent-gold)]" />
                 Stack blocks
             </label>
+            <label className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]" title="Where output nobody in the module needs goes (byproducts, overflow), so it doesn't block the belts. Auto: knowledge altar, else trash barrel, else dispatch portal, whichever is unlocked">
+                Leftovers
+                <select
+                    value={options.disposal ?? "auto"}
+                    onChange={(e) => onOptionsChange({ ...options, disposal: e.target.value === "auto" ? undefined : (e.target.value as NonNullable<GeneratorOptions["disposal"]>) })}
+                    className="bg-[var(--background)] border border-[var(--border)] rounded px-1 py-0.5 text-[var(--text-primary)] normal-case tracking-normal"
+                >
+                    <option value="auto">Auto</option>
+                    <option value="altar">Knowledge altar</option>
+                    <option value="trash">Trash barrel</option>
+                    <option value="sell">Dispatch portal</option>
+                    <option value="export">Send out</option>
+                </select>
+            </label>
             <UnlocksMenu unlocks={props.unlocks} onChange={props.onUnlocksChange} buttonClass={buttonClass} />
 
             <span className="w-px h-6 bg-[var(--border)] mx-1" />

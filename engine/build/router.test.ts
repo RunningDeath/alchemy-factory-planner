@@ -136,15 +136,15 @@ describe("surplus", () => {
     step({ nodeKey: "a", itemName: "Linen", machines: 1, inputs: [{ itemName: "Flax Fiber", perMachineRate: 50 }], outputs: [{ itemName: "Linen", perMachineRate: 10 }] }),
   ];
 
-  test("by default the overflow leaves through a priority splitter, consumers first", () => {
-    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"] });
+  test("surplus sent out leaves through a priority splitter, consumers first", () => {
+    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"], exportItems: ["Flax Fiber"] });
     expectFullyConnected(mod);
     expect(mod.io.some((p) => p.kind === "export" && p.itemName === "Flax Fiber")).toBe(true);
     expect(mod.placements.some((p) => p.id === "splitter-vert")).toBe(true);
   });
 
-  test("kept surplus stays in the line: no export, no splitter", () => {
-    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"], keepItems: ["Flax Fiber"] });
+  test("by default surplus stays in the line: no export, no splitter", () => {
+    const mod = generateModule(surplusSteps, { ...options, finalProducts: ["Linen"] });
     expect(mod.io.some((p) => p.itemName === "Flax Fiber")).toBe(false);
     expect(mod.surplus.map((x) => x.itemName)).toEqual(["Flax Fiber"]);
     expect(validateLayout(mod.placements)).toEqual([]);

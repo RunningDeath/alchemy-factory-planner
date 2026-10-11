@@ -75,7 +75,7 @@ const PORT_SIDES: [keyof RawPort & ('Left' | 'Right' | 'Up' | 'Bottom'), Side][]
 ];
 
 /** Rows not useful for factory modules: rails, elevators, expandable pieces, launchers, payload actors */
-const EXCLUDED_ROWS = /^(Railroad|Track|Elevator|Expandable|Catapult|Cannon|SmartCannon|DrawBridgeR|CrossTunnel|ConveyerLift_Payload|BounceShroom|PhantomTempBag|SpawnTrain|KnowledgeAltar)/;
+const EXCLUDED_ROWS = /^(Railroad|Track|Elevator|Expandable|Catapult|Cannon|SmartCannon|DrawBridgeR|CrossTunnel|ConveyerLift_Payload|BounceShroom|PhantomTempBag|SpawnTrain)/;
 
 /**
  * The drawbridge conveyor lists both ports on its anchor cell. It carries items across
@@ -91,6 +91,8 @@ const PORT_OVERRIDES: Record<string, (raw: RawBuilding) => FootprintPort[]> = {
 export function categoryFor(row: string, raw: RawBuilding): BuildingCategory | null {
   const tags = raw.BuildingTags.join(',');
   if (EXCLUDED_ROWS.test(row)) return null;
+  // Takes items in and turns them into knowledge: a sink like the trash barrel
+  if (row === 'KnowledgeAltar') return 'storage';
   if (/^Construct_Floor/.test(row)) return 'floor';
   // Shop furniture that recipes craft in
   if (/^(BrewBarrel|GrandPortal)$/.test(row)) return 'production';

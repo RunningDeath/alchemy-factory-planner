@@ -25,6 +25,7 @@ import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotate
 import { buildOccupancy, placementCells, placementPorts, type Placement } from "./layout";
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
+import { attachDisposal, type Disposal } from "./disposal";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -73,12 +74,14 @@ export interface ModuleOptions {
     useBridges?: boolean;
     /** The plan's targets: always sent out at the module edge */
     finalProducts?: string[];
-    /** Surplus and byproducts that stay in the line instead of leaving at the edge */
-    keepItems?: string[];
+    /** Surplus the player sends out at the edge (the rest stays in the line; final products always leave) */
+    exportItems?: string[];
     /** The player's level and unlocks; only those buildings are used. Absent: everything */
     unlocks?: BuildUnlocks;
     /** Put small blocks on top of others to save floor (default: yes) */
     stackBlocks?: boolean;
+    /** Unneeded output (byproducts, overflow): knowledge altar, trash barrel, dispatch portal or out at the edge. Default: the first of these that is unlocked */
+    disposal?: Disposal;
     /** Progress while laying out and routing: share done (0–1) and what is happening */
     onProgress?: (fraction: number, label: string) => void;
 }
@@ -1116,6 +1119,9 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         ...CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"]]),
         [CORRIDORS[CORRIDORS.length - 1], "packed"],
     ];
+    // Byproducts: second outputs that share a machine's output belt with its product;
+    // left on the belt they would block the machine
+    const leftovers = new Set(steps.flatMap((st) => (st.outputs.length >= 2 ? st.outputs.filter((o) => o.itemName !== st.itemName).map((o) => o.itemName) : [])));
     const singles: Tower[] = blocks.map((b, index) => ({ members: [{ index, dx: 0, dy: 0, dz: 0 }], placements: b.placements, width: b.info.width, depth: b.info.depth }));
     const related = (a: number, b: number) => flow[a].feeders.includes(b) || flow[b].feeders.includes(a);
     const towers =
@@ -1141,7 +1147,7 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
             const base = attempt++;
             const onProgress = options.onProgress && ((f: number) => options.onProgress!((base + f) / total, label));
             onProgress?.(0);
-            const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can);
+            const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can, leftovers);
             if (!best || score(result) < score(best)) best = result;
             // Both layouts of a corridor width get a chance before settling
             if (mode === "flow" && best.routes.every((r) => r.ok)) break;
@@ -1154,6 +1160,20 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
 }
 
 type BlockFlow = { stage: number; feeders: number[]; feederWeights: number[] };
+
+/**
+ * Where unneeded output goes, best first: the player's choice, then the knowledge altar,
+ * trash barrel and dispatch portal, whichever is unlocked (out at the edge if none fits)
+ */
+function disposalFor(options: ModuleOptions, can: Capabilities): Disposal[] {
+    if (options.disposal === "export") return ["export"];
+    const unlocked: Disposal[] = [];
+    if (can.altar) unlocked.push("altar");
+    if (can.trash && can.lifts) unlocked.push("trash");
+    if (can.sell) unlocked.push("sell");
+    const chosen = options.disposal;
+    return chosen ? [chosen, ...unlocked.filter((d) => d !== chosen)] : unlocked;
+}
 
 /** Flow between towers: a tower is as early as its earliest block and fed by its blocks' feeders */
 function towerFlow(towers: Tower[], flow: BlockFlow[]): BlockFlow[] {
@@ -1179,6 +1199,7 @@ function layOut(
     mode: LayoutMode,
     options: ModuleOptions,
     can: Capabilities,
+    leftovers: Set<string>,
 ): GeneratedModule {
     const pad = corridor * 2;
     const sizes = towers.map((t) => ({ width: t.width + pad, depth: t.depth + pad }));
@@ -1212,6 +1233,12 @@ function layOut(
         }
     });
 
+    const finals = new Set(options.finalProducts ?? []);
+    const chosen = new Set(options.exportItems ?? []);
+    // What the module makes and nothing in it uses: always leaves, final products or not
+    const consumed = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
+    const products = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
+
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
         ? routeModule(blockPlacements, {
@@ -1223,13 +1250,19 @@ function layOut(
               bridges: options.useBridges && can.bridges,
               lifts: can.lifts,
               prioritySplitters: can.prioritySplitters,
-              // Final products always leave; chosen surplus stays in the line
-              keepItems: (options.keepItems ?? []).filter((item) => !(options.finalProducts ?? []).includes(item)),
+              // Final products and chosen surplus leave; byproducts that share a belt go to a sink
+              // (through any side); other surplus stays in the line (it only slows its machines)
+              exportable: (item) => finals.has(item) || products.has(item) || chosen.has(item) || leftovers.has(item),
+              sideExit: (item) => leftovers.has(item) && !finals.has(item) && !chosen.has(item),
           })
         : { placements: [], routes: [], io: [], surplus: [] };
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
     // beams instead of pillars under longer raised belt runs
     // (lab stands a belt passes through stay; without that unlock they show up as locked)
+    // Byproducts nobody takes end in a knowledge altar, trash barrel or dispatch portal
+    const disposed = attachDisposal(routed.placements, routed.io, (item) => finals.has(item) || products.has(item) || chosen.has(item), disposalFor(options, can), () => nextUid("x"));
+    routed.placements = disposed.placements;
+    routed.io = disposed.io;
     const blocked = preferBlocks(pruneSupports(routed.placements));
     routed.placements = pruneSupports(can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked);
 

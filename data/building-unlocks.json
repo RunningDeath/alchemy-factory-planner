@@ -194,6 +194,11 @@
   "via": "research",
   "by": "SteamBoiler"
  },
+ "knowledge-altar": {
+  "level": 5,
+  "via": "research",
+  "by": "KnowledgeAltar"
+ },
  "cauldron": {
   "level": 6,
   "via": "research",

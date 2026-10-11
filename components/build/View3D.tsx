@@ -289,7 +289,8 @@ function blockLabels(tiers: TierInfo[], io: IoPoint[], placements: Placement[], 
     const sprites: THREE.Sprite[] = [];
     for (const point of io) {
         const importing = point.kind === "import";
-        const sprite = textSprite([`${importing ? "IN" : "OUT"}: ${point.itemName}`, `${formatRate(point.rate)}/m`], importing ? BELT_COLORS.in : BELT_COLORS.out, 0.7);
+        const tag = importing ? "IN" : point.kind === "export" ? "OUT" : point.kind === "altar" ? "ALTAR" : point.kind === "trash" ? "TRASH" : "SELL";
+        const sprite = textSprite([`${tag}: ${point.itemName}`, `${formatRate(point.rate)}/m`], importing ? BELT_COLORS.in : BELT_COLORS.out, 0.7);
         sprite.position.set(point.cell[0] + 0.5, point.cell[2] + 1.6, point.cell[1] + 0.5);
         sprites.push(sprite);
     }

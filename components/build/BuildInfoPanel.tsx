@@ -15,7 +15,6 @@ interface BuildInfoPanelProps {
     routes: RouteResult[];
     io: IoPoint[];
     surplus: { itemName: string; rate: number }[];
-    keepItems: string[];
     finalProducts: string[];
     onToggleExport: (itemName: string, on: boolean) => void;
     onSelect: (uid: string) => void;
@@ -30,7 +29,9 @@ const ISSUE_TEXT: Record<LayoutIssue["kind"], string> = {
     unheated: "needs a heating device under it",
 };
 
-export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, surplus, keepItems, finalProducts, onToggleExport, onSelect, onGoToLevel }: BuildInfoPanelProps) {
+const DISPOSAL_LABEL = { altar: "Into a knowledge altar", trash: "Into a trash barrel", sell: "Sold at a dispatch portal" } as const;
+
+export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, surplus, finalProducts, onToggleExport, onSelect, onGoToLevel }: BuildInfoPanelProps) {
     const byUid = useMemo(() => new Map(placements.map((p) => [p.uid, p])), [placements]);
     const bounds = useMemo(() => layoutBounds(placements), [placements]);
     const bill = useMemo(() => [...billOfMaterials(placements).entries()].sort((a, b) => b[1] - a[1]), [placements]);
@@ -87,7 +88,7 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, s
 
             {routes.length > 0 && <ConnectionsSection routes={routes} io={io} />}
             {routes.length > 0 && (
-                <SurplusSection io={io} surplus={surplus} keepItems={keepItems} finalProducts={finalProducts} onToggle={onToggleExport} />
+                <SurplusSection io={io} surplus={surplus} finalProducts={finalProducts} onToggle={onToggleExport} />
             )}
 
             {tiers.length > 0 && (
@@ -186,6 +187,13 @@ function ConnectionsSection({ routes, io }: { routes: RouteResult[]; io: IoPoint
                     OUT at the edge: {item} {formatRate(rate)}/m
                 </span>
             ))}
+            {(["altar", "trash", "sell"] as const).flatMap((kind) =>
+                sum(kind).map(([item, rate]) => (
+                    <span key={`${kind}${item}`} className="text-[var(--text-muted)]">
+                        {DISPOSAL_LABEL[kind]}: {item} {formatRate(rate)}/m
+                    </span>
+                )),
+            )}
             {[...groups.values()].map((g) => (
                 <span key={`${g.itemName}${g.from}${g.to}`} className="text-[var(--text-secondary)]">
                     {g.itemName} {formatRate(g.rate)}/m: {g.from} → {g.to}
@@ -202,29 +210,29 @@ function ConnectionsSection({ routes, io }: { routes: RouteResult[]; io: IoPoint
 }
 
 /**
- * Output nobody in the module uses (rounded-up machines, byproducts). Final products always
- * leave at the edge. Surplus leaves too by default, through a priority splitter so the
- * module's own consumers come first; the player can keep it in the line instead.
+ * Output nobody in the module uses (rounded-up machines). Final products always leave at
+ * the edge. Surplus stays in the line by default (it only slows its machines); the player
+ * can send it out, through a priority splitter so the module's own consumers come first.
  */
 function SurplusSection({
     io,
     surplus,
-    keepItems,
     finalProducts,
     onToggle,
 }: {
     io: IoPoint[];
     surplus: { itemName: string; rate: number }[];
-    keepItems: string[];
     finalProducts: string[];
     onToggle: (itemName: string, on: boolean) => void;
 }) {
     const exported = new Map<string, number>();
     io.filter((p) => p.kind === "export").forEach((p) => exported.set(p.itemName, (exported.get(p.itemName) ?? 0) + p.rate));
+    // Surplus stays in the line unless sent out (it only slows its machines); byproducts
+    // that share a belt go to a sink and are listed under Connections
     const rows = [
         ...[...exported.entries()].filter(([item]) => !finalProducts.includes(item)).map(([itemName, rate]) => ({ itemName, rate, on: true })),
         ...surplus.map((x) => ({ ...x, on: false })),
-    ].filter((r) => r.on || keepItems.includes(r.itemName));
+    ].filter((r, i, all) => all.findIndex((o) => o.itemName === r.itemName) === i);
     if (rows.length === 0) return null;
     return (
         <section className="flex flex-col gap-1">

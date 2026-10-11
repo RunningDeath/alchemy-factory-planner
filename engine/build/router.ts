@@ -43,7 +43,8 @@ export interface RouteResult {
 }
 
 export interface IoPoint {
-    kind: "import" | "export";
+    /** altar / trash / sell: an unneeded item ends in a knowledge altar, trash barrel or dispatch portal there */
+    kind: "import" | "export" | "altar" | "trash" | "sell";
     itemName: string;
     cell: Cell;
     rate: number;
@@ -66,8 +67,10 @@ export interface RouterOptions {
     blockNames: string[];
     /** Drawbridge conveyors may cross gaps without supports (needs the unlock and linen rope) */
     bridges?: boolean;
-    /** Unused output of these items stays in the line instead of leaving at the module edge */
-    keepItems?: string[];
+    /** Items whose unused output leaves the module (the rest stays in the line); default: all */
+    exportable?: (itemName: string) => boolean;
+    /** Items that may also leave through the module's sides (leftovers for a sink), not only front and back */
+    sideExit?: (itemName: string) => boolean;
     /** Conveyor lifts may change levels (default: yes) */
     lifts?: boolean;
     /** Priority splitters put consumers before the export (default: yes) */
@@ -317,7 +320,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
     const inBounds = (c: Cell) => c[0] >= minX && c[0] <= maxX && c[1] >= minY && c[1] <= maxY && c[2] >= 0 && c[2] <= maxZ;
-    // Modules stand side by side in a line: belts come in and leave only at the front and back
+    // Modules stand side by side in a line: belts come in at the front and leave at the back
     const onEdge = (c: Cell) => c[2] === 0 && (c[1] === minY || c[1] === maxY);
 
     const nodes = new Map<string, RouteNode>();
@@ -617,8 +620,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const entryFed = new Set<string>();
 
     const surplusList: { itemName: string; rate: number }[] = [];
-    const exportable = options.keepItems ? (item: string) => !options.keepItems!.includes(item) : undefined;
-    const connections = assignFlows(ends, exportable, surplusList);
+    const connections = assignFlows(ends, options.exportable, surplusList);
 
     // An exit that feeds consumers and also exports its surplus gets a priority splitter:
     // consumers first, only the overflow leaves at the edge (a plain split would halve them)
@@ -670,7 +672,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             }
             const extra = joinable ? EXTRA_IMPORT_COST : 0;
             for (let x = minX; x <= maxX; x++) {
-                starts.push({ cell: [x, minY, 0], inSide: "up", edge: true, extra }, { cell: [x, maxY, 0], inSide: "down", edge: true, extra });
+                // Raw materials come in at the front only; products leave at the back
+                starts.push({ cell: [x, minY, 0], inSide: "up", edge: true, extra });
             }
         } else {
             const from = conn.from;
@@ -690,10 +693,13 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         let estimate: (c: Cell) => number;
         if (conn.to === "export") {
             const exportTrees = [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}` && !n.lift && n.items.size === 1);
-            estimate = (c) => Math.min(c[1] - minY, maxY - c[1]) + c[2];
+            // Leftovers for a sink may leave through the sides too; everything else front or back
+            const sides = options.sideExit?.(conn.itemName) ?? false;
+            estimate = (c) => (sides ? Math.min(c[0] - minX, maxX - c[0], maxY - c[1]) : maxY - c[1]) + c[2];
             goal = (cell, heading) => {
                 const nextCell = add(cell, heading);
-                if (onEdge(cell) && (nextCell[1] < minY || nextCell[1] > maxY)) return { kind: "edge" };
+                if (onEdge(cell) && nextCell[1] > maxY) return { kind: "edge" };
+                if (sides && cell[2] === 0 && (nextCell[0] < minX || nextCell[0] > maxX) && (cell[0] === minX || cell[0] === maxX)) return { kind: "edge" };
                 const m = nodes.get(keyOf(nextCell));
                 if (m && exportTrees.includes(m) && (treeTotals.get(m.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6 && canAdd(m, oppositeSide(heading), "in")) {
                     return { kind: "merge", node: m, side: oppositeSide(heading) };

@@ -190,6 +190,7 @@ describe("separate inputs, filters and heating", () => {
       [
         step({
           deviceId: "grinder",
+          itemName: "Dust",
           machines: 2,
           inputs: [{ itemName: "Ore", perMachineRate: 20 }],
           outputs: [
@@ -205,7 +206,9 @@ describe("separate inputs, filters and heating", () => {
     expect(filters.length).toBeGreaterThan(0);
     expect(filters.every((f) => f.filterItem === "Dust")).toBe(true);
     expect(mod.routes.every((r) => r.ok)).toBe(true);
-    expect(mod.io.filter((p) => p.kind === "export").map((p) => p.itemName).sort()).toEqual(["Dust", "Grit"]);
+    // The product leaves; the byproduct nobody takes goes to a sink (a knowledge altar, all unlocked)
+    expect(mod.io.filter((p) => p.kind === "export").map((p) => p.itemName)).toEqual(["Dust"]);
+    expect(mod.io.find((p) => p.itemName === "Grit")?.kind).toBe("altar");
   });
 
   test("stove heating: crucibles stand on stone stoves, fed by a fuel belt", () => {
