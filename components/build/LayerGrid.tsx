@@ -7,7 +7,7 @@ import { footprintPorts, getFootprint, rotatedSize, SIDE_OFFSET } from "../../en
 import { placementCells, placementIssues, type LayoutIssue, type Placement, type PortStatus, type WorldCell } from "../../engine/build/layout";
 import { QUAD, type Side } from "../../engine/build/types";
 import { placementsAt } from "../../engine/build/edit";
-import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, itemIdByName, placementColor } from "../../lib/buildCatalog";
+import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, itemIdByName, placementColor, showsIcons } from "../../lib/buildCatalog";
 import { gameIconUrl, useGameIcons } from "../../lib/gameIcons";
 
 export interface BuildTool {
@@ -186,7 +186,7 @@ export function LayerGrid({
 
     /** The exported game icon of what a production machine makes, if there is one */
     function productIcon(p: Placement): string | null {
-        if (getFootprint(p.id)?.category !== "production") return null;
+        if (!showsIcons(p.id)) return null;
         const item = carriedItem(p);
         const id = item ? itemIdByName(item) : undefined;
         return id ? gameIconUrl(icons, "items", id) : null;

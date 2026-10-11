@@ -112,10 +112,19 @@ export function itemColorMap(items: string[]): Map<string, string> {
 
 /** The single item a belt, lift or machine carries or makes, if it's just one */
 export function carriedItem(p: Placement): string | null {
+    if (p.supplyItem) return p.supplyItem;
     if (!p.label || p.label.includes(" + ") || p.label.startsWith("filter:")) return null;
     const category = getFootprint(p.id)?.category;
     if (category === "production" || category === "logistics" || p.lane) return p.label;
     return null;
+}
+
+/** Buildings that get icons in 3D and 2D: machines, portals, heaters and sinks */
+const ICON_CATEGORIES = new Set(["production", "portal", "heating"]);
+const ICON_SINKS = new Set(["knowledge-altar", "junk-barrel"]);
+export function showsIcons(id: string): boolean {
+    const category = getFootprint(id)?.category;
+    return (!!category && ICON_CATEGORIES.has(category)) || ICON_SINKS.has(id);
 }
 
 export function placementColor(p: Placement, itemColors: Map<string, string>): string {

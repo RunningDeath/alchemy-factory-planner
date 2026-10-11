@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { getFootprint, rotatedSize } from "../../engine/build/footprint";
 import type { Placement } from "../../engine/build/layout";
-import { buildingName, carriedItem, itemIdByName } from "../../lib/buildCatalog";
+import { buildingName, carriedItem, itemIdByName, showsIcons } from "../../lib/buildCatalog";
 import { gameIconUrl, initials, type GameIconManifest } from "../../lib/gameIcons";
 
 const SIZE = 128;
@@ -124,7 +124,7 @@ export function machineIconMeshes(placements: Placement[], cutLevel: number | nu
 
     for (const p of placements) {
         const fp = getFootprint(p.id);
-        if (fp?.category !== "production") continue;
+        if (!fp || !showsIcons(p.id)) continue;
         if (cutLevel !== null && p.z > cutLevel) continue;
         const size = rotatedSize(fp, p.rot);
         const top = cutLevel !== null ? Math.min(p.z + size.z, cutLevel + 1) : p.z + size.z;
