@@ -29,3 +29,14 @@ bun run build-unlocks dt_buildings.json
 The dump also holds the research tree, workbench recipes and quests; `build-unlocks` turns them into `data/building-unlocks.json` (the level each building becomes available at).
 
 The first run downloads the Oodle decompression library that CUE4Parse needs.
+
+## Icons (optional, local only)
+
+The 3D build view draws the produced item's icon and the machine's icon on each machine. The icons are the game's own art, so they are not in the repo (`public/game-icons/` is gitignored). Without them the view draws generated badges instead. To use the real icons, export them from your install:
+
+```bash
+cd tools/extract-game-data
+dotnet run -c Release -- icons "<Steam>/steamapps/common/Alchemy Factory/AlchemyFactory/Content/Paks" path/to/mappings.usmap ../..
+```
+
+This writes 64×64 PNGs to `public/game-icons/buildings/<building id>.png` (from `DT_Buildings.DisplayIcon`) and `public/game-icons/items/<item id>.png`. The ids come from `data/building-footprints.json` and `data/items.json`. The paks have no item table, so the item icon paths are read from the [AlchemyFactoryData](https://github.com/faultyd3v/AlchemyFactoryData) `items.json`. That step needs internet access.
