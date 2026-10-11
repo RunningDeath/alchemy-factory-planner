@@ -179,6 +179,8 @@ function transformItems(
     recipeOutputs.set(outputName, recipe);
   });
 
+  const displayNames = uniqueDisplayNames(remoteItems);
+
   return remoteItems
     .filter(item => {
       // Filter out special items that aren't used in production
@@ -190,7 +192,7 @@ function transformItems(
       const internalName = item.name || '';
       const itemId = internalName.toLowerCase();
       // Use displayName for user-facing name (e.g., "Plank")
-      const displayName = item.displayName || internalName;
+      const displayName = displayNames.get(itemId) || internalName;
 
       const transformed: LocalItem = {
         id: itemId,
@@ -404,6 +406,34 @@ function transformBuildings(
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Display name per internal name (lowercase). The game gives several items the same
+ * display name (six tiers of "Refined Sand"), but the planner, graph and build planner
+ * tell items apart by name, so a shared name gets the internal name's tier number
+ * ("Sand3" -> "Refined Sand 3"), or the internal name when it has none.
+ */
+function uniqueDisplayNames(remoteItems: RemoteItem[]): Map<string, string> {
+  const displayOf = (item: RemoteItem) => item.displayName || item.name || '';
+  const counts = new Map<string, number>();
+  remoteItems.forEach(item => {
+    const key = displayOf(item).toLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+
+  const names = new Map<string, string>();
+  remoteItems.forEach(item => {
+    const internalName = item.name || '';
+    const displayName = displayOf(item);
+    if ((counts.get(displayName.toLowerCase()) || 0) < 2) {
+      names.set(internalName.toLowerCase(), displayName);
+      return;
+    }
+    const tier = internalName.match(/(\d+)$/)?.[1];
+    names.set(internalName.toLowerCase(), tier ? `${displayName} ${tier}` : `${displayName} (${internalName})`);
+  });
+  return names;
+}
+
 function nameToKebab(name: string): string {
   return name
     .replace(/([a-z])([A-Z])/g, '$1-$2')  // Add hyphen between camelCase words
@@ -424,12 +454,7 @@ function transformCrafting(
   remoteItems: RemoteItem[]
 ): LocalRecipe[] {
   // Build lookup map: internal name (lowercase) -> display name
-  const itemDisplayNames = new Map<string, string>();
-  remoteItems.forEach(item => {
-    const internalName = (item.name || '').toLowerCase();
-    const displayName = item.displayName || item.name || '';
-    itemDisplayNames.set(internalName, displayName);
-  });
+  const itemDisplayNames = uniqueDisplayNames(remoteItems);
 
   return remoteCrafting.map(craft => {
     // fractionNum represents the number of times a recipe cycles per unit of input

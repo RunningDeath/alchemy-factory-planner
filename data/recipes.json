@@ -1625,7 +1625,7 @@
     "outputs": [
       {
         "id": "sand2",
-        "name": "Refined Sand",
+        "name": "Refined Sand 2",
         "count": 1
       }
     ],
@@ -1638,14 +1638,14 @@
     "inputs": [
       {
         "id": "sand2",
-        "name": "Refined Sand",
+        "name": "Refined Sand 2",
         "count": 2
       }
     ],
     "outputs": [
       {
         "id": "sand3",
-        "name": "Refined Sand",
+        "name": "Refined Sand 3",
         "count": 1
       }
     ],
@@ -1658,14 +1658,14 @@
     "inputs": [
       {
         "id": "sand3",
-        "name": "Refined Sand",
+        "name": "Refined Sand 3",
         "count": 2
       }
     ],
     "outputs": [
       {
         "id": "sand4",
-        "name": "Refined Sand",
+        "name": "Refined Sand 4",
         "count": 1
       }
     ],
@@ -1678,14 +1678,14 @@
     "inputs": [
       {
         "id": "sand4",
-        "name": "Refined Sand",
+        "name": "Refined Sand 4",
         "count": 2
       }
     ],
     "outputs": [
       {
         "id": "sand5",
-        "name": "Refined Sand",
+        "name": "Refined Sand 5",
         "count": 1
       }
     ],
@@ -1698,14 +1698,14 @@
     "inputs": [
       {
         "id": "sand5",
-        "name": "Refined Sand",
+        "name": "Refined Sand 5",
         "count": 2
       }
     ],
     "outputs": [
       {
         "id": "sand6",
-        "name": "Refined Sand",
+        "name": "Refined Sand 6",
         "count": 1
       }
     ],
@@ -1718,7 +1718,7 @@
     "inputs": [
       {
         "id": "sand6",
-        "name": "Refined Sand",
+        "name": "Refined Sand 6",
         "count": 2
       }
     ],
@@ -3732,14 +3732,14 @@
     "inputs": [
       {
         "id": "sand6",
-        "name": "Refined Sand",
+        "name": "Refined Sand 6",
         "count": 2
       }
     ],
     "outputs": [
       {
         "id": "sand7",
-        "name": "Refined Sand",
+        "name": "Refined Sand 7",
         "count": 1
       }
     ],
