@@ -133,3 +133,87 @@ export function flowRows(items: FlowItem[], maxWidth: number, gapX: number, gapY
     }
     return { positions, width, depth: y - gapY };
 }
+
+export interface FeedItem extends FlowItem {
+    /** How many belts' worth comes from each feeder (parallel to feeders) */
+    feederWeights: number[];
+}
+
+/**
+ * Near-feeder layout: blocks go in production order, each at the free spot (below, beside
+ * or above an already placed block) that keeps its belts shortest: the distance from each
+ * feeder's output edge to this block's input edge, weighted by how much flows between them,
+ * plus a little for growing the module. Inputs face up (-y), outputs down (+y), so a spot
+ * right below the main feeder is usually best.
+ */
+export function nearFeeders(items: FeedItem[], maxWidth: number): { positions: PackedItem[]; width: number; depth: number } {
+    const positions = new Array<PackedItem>(items.length);
+    const placed: number[] = [];
+    const order = items.map((_, i) => i).sort((a, b) => items[a].stage - items[b].stage || a - b);
+    const overlaps = (x: number, y: number, w: number, d: number) =>
+        placed.some((j) => {
+            const p = positions[j];
+            return x < p.x + items[j].width && p.x < x + w && y < p.y + items[j].depth && p.y < y + d;
+        });
+    const bounds = (extra?: { x: number; y: number; w: number; d: number }) => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const rects = placed.map((j) => ({ x: positions[j].x, y: positions[j].y, w: items[j].width, d: items[j].depth }));
+        if (extra) rects.push(extra);
+        for (const r of rects) {
+            minX = Math.min(minX, r.x);
+            minY = Math.min(minY, r.y);
+            maxX = Math.max(maxX, r.x + r.w);
+            maxY = Math.max(maxY, r.y + r.d);
+        }
+        return { minX, minY, maxX, maxY };
+    };
+
+    for (const i of order) {
+        const it = items[i];
+        if (placed.length === 0) {
+            positions[i] = { x: 0, y: 0, rot: 0 };
+            placed.push(i);
+            continue;
+        }
+        // Candidate spots around every placed block, aligned to its edges and center
+        const candidates: [number, number][] = [];
+        for (const j of placed) {
+            const p = positions[j];
+            const o = items[j];
+            const xs = [p.x, p.x + Math.round((o.width - it.width) / 2), p.x + o.width - it.width];
+            const ys = [p.y, p.y + o.depth - it.depth];
+            for (const x of xs) candidates.push([x, p.y + o.depth], [x, p.y - it.depth]);
+            for (const y of ys) candidates.push([p.x + o.width, y], [p.x - it.width, y]);
+        }
+        let best: { x: number; y: number; score: number } | null = null;
+        const before = bounds();
+        const area = (b: ReturnType<typeof bounds>) => (b.maxX - b.minX) * (b.maxY - b.minY);
+        for (const [x, y] of candidates) {
+            if (overlaps(x, y, it.width, it.depth)) continue;
+            const after = bounds({ x, y, w: it.width, d: it.depth });
+            if (after.maxX - after.minX > maxWidth && after.maxX - after.minX > before.maxX - before.minX) continue;
+            let belts = 0;
+            it.feeders.forEach((f, k) => {
+                if (!positions[f]) return;
+                const fp = positions[f];
+                const fo = items[f];
+                // From the feeder's output edge (bottom) to this block's input edge (top)
+                const dx = Math.abs(fp.x + fo.width / 2 - (x + it.width / 2));
+                const dy = Math.abs(fp.y + fo.depth - y);
+                // Belts going back up around a block are much longer than the straight distance
+                const upward = y < fp.y + fo.depth ? fo.depth + it.depth : 0;
+                belts += (dx + dy + upward) * it.feederWeights[k];
+            });
+            const score = belts + (area(after) - area(before)) * 0.05;
+            if (!best || score < best.score) best = { x, y, score };
+        }
+        // Nothing fits within the width: start below everything
+        positions[i] = best ? { x: best.x, y: best.y, rot: 0 } : { x: before.minX, y: before.maxY, rot: 0 };
+        placed.push(i);
+    }
+
+    // Shift to start at 0,0
+    const b = bounds();
+    for (const i of placed) positions[i] = { ...positions[i], x: positions[i].x - b.minX, y: positions[i].y - b.minY };
+    return { positions, width: b.maxX - b.minX, depth: b.maxY - b.minY };
+}

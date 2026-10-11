@@ -25,7 +25,10 @@ import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotate
 import { buildOccupancy, placementPorts, type Placement } from "./layout";
 import { preferBlocks, supportColumn, beamsUnderRuns } from "./supports";
 import deviceMetadata from "../../data/device-metadata.json";
-import { flowRows, packBlocks, transformBlock } from "./packing";
+import { flowRows, nearFeeders, packBlocks, transformBlock } from "./packing";
+
+/** near: next to the feeding blocks; flow: rows by production stage; packed: tightest fit */
+type LayoutMode = "near" | "flow" | "packed";
 import { routeModule, type IoPoint, type RouteResult } from "./router";
 import type { BuildingFootprint, Side } from "./types";
 
@@ -879,10 +882,14 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
     const flow = blocks.map((b) => {
         const st = stepByNode.get(b.info.nodeKey)!;
         const feederNodes = new Set(st.inputs.flatMap((i) => producers(i.itemName)).map((p) => p.nodeKey));
-        return {
-            stage: stageOf(st),
-            feeders: blocks.map((o, i) => (feederNodes.has(o.info.nodeKey) ? i : -1)).filter((i) => i >= 0),
-        };
+        const feeders = blocks.map((o, i) => (feederNodes.has(o.info.nodeKey) ? i : -1)).filter((i) => i >= 0);
+        // How many belts' worth this block takes from each feeder (its inputs that feeder makes)
+        const feederWeights = feeders.map((i) => {
+            const made = new Set(stepByNode.get(blocks[i].info.nodeKey)!.outputs.map((o) => o.itemName));
+            const rate = st.inputs.filter((inp) => made.has(inp.itemName)).reduce((sum, inp) => sum + inp.perMachineRate * b.info.machines, 0);
+            return Math.max(0.25, rate / options.beltSpeed);
+        });
+        return { stage: stageOf(st), feeders, feederWeights };
     });
 
     // Keep the layout that routes everything with the fewest lifts and the least floor
@@ -890,13 +897,20 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
     const score = (m: GeneratedModule) =>
         m.routes.filter((r) => !r.ok).length * 100000 +
         m.placements.filter((p) => p.id === "conveyer-lift-upwards" || p.id === "conveyer-lift-downwards").length * 40 +
+        // Belt length between blocks: long transports are what makes a module sprawl
+        m.placements.filter((p) => p.uid.startsWith("rb-")).length * 3 +
         m.size[0] * m.size[1];
-    // Flow layout first, with wider corridors if belts don't fit; tight packing only as a last resort
-    const attempts: [number, "flow" | "packed"][] = [...CORRIDORS.map((c): [number, "flow"] => [c, "flow"]), [CORRIDORS[CORRIDORS.length - 1], "packed"]];
+    // Near-feeder and stage-row layouts per corridor width, wider corridors if belts don't fit;
+    // tight packing only as a last resort
+    const attempts: [number, LayoutMode][] = [
+        ...CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"]]),
+        [CORRIDORS[CORRIDORS.length - 1], "packed"],
+    ];
     for (const [corridor, mode] of attempts) {
         const result = layOut(blocks, flow, corridor, mode, options);
         if (!best || score(result) < score(best)) best = result;
-        if (best.routes.every((r) => r.ok)) break;
+        // Both layouts of a corridor width get a chance before settling
+        if (mode === "flow" && best.routes.every((r) => r.ok)) break;
     }
     return best!;
 }
@@ -904,17 +918,19 @@ export function generateModule(steps: ModuleStep[], options: ModuleOptions): Gen
 /** Places the blocks with free corridors between them and belts them together */
 function layOut(
     blocks: { placements: Placement[]; info: TierInfo }[],
-    flow: { stage: number; feeders: number[] }[],
+    flow: { stage: number; feeders: number[]; feederWeights: number[] }[],
     corridor: number,
-    mode: "flow" | "packed",
+    mode: LayoutMode,
     options: ModuleOptions,
 ): GeneratedModule {
     const pad = corridor * 2;
     const sizes = blocks.map((b) => ({ width: b.info.width + pad, depth: b.info.depth + pad }));
     const packed =
-        mode === "flow"
-            ? flowRows(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad, 0, 1)
-            : packBlocks(sizes, options.maxWidth + pad);
+        mode === "near"
+            ? nearFeeders(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad)
+            : mode === "flow"
+              ? flowRows(sizes.map((sz, i) => ({ ...sz, ...flow[i] })), options.maxWidth + pad, 0, 1)
+              : packBlocks(sizes, options.maxWidth + pad);
     const blockPlacements: Placement[] = [];
     const tiers = blocks.map((b, i) => {
         const pos = packed.positions[i];

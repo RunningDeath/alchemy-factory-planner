@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { portConnections, validateLayout, type Placement } from "./layout";
-import { packBlocks, transformBlock } from "./packing";
+import { nearFeeders, packBlocks, transformBlock } from "./packing";
 
 describe("packBlocks", () => {
   test("never overlaps and stays within the width limit", () => {
@@ -44,5 +44,20 @@ describe("transformBlock", () => {
     const input = portConnections(turned).find((s) => s.port.uid === "a" && s.port.dir === "in" && s.connectedTo);
     expect(input?.connectedTo).toBe("b");
     expect(turned.every((p) => p.x >= 5 && p.y >= 5)).toBe(true);
+  });
+});
+
+describe("nearFeeders", () => {
+  test("a consumer lands right below its feeder, not in a far row", () => {
+    const { positions } = nearFeeders(
+      [
+        { width: 6, depth: 4, stage: 0, feeders: [], feederWeights: [] },
+        { width: 6, depth: 4, stage: 0, feeders: [], feederWeights: [] },
+        { width: 6, depth: 4, stage: 1, feeders: [1], feederWeights: [8] },
+      ],
+      32,
+    );
+    expect(positions[2].y).toBe(positions[1].y + 4);
+    expect(Math.abs(positions[2].x - positions[1].x)).toBeLessThanOrEqual(1);
   });
 });
