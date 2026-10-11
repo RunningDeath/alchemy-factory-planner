@@ -400,7 +400,7 @@ export function getRecipeById(id: string): Recipe | undefined {
  */
 function recipesFor(ctx: EfficiencyContext): Recipe[] {
   if (!ctx.useCauldron) return allRecipes;
-  const cauldron = cauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs });
+  const cauldron = cauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs }).filter((r) => !ctx.cauldronOnly || ctx.cauldronOnly.has(r.id));
   const replaced = new Set(cauldron.map((r) => r.outputs[0].id));
   const primary = (r: Recipe) => r.outputs[0]?.id || normalizeItemId(r.outputs[0]?.name ?? "");
   return [...allRecipes.filter((r) => !replaced.has(primary(r))), ...cauldron];

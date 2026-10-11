@@ -14,6 +14,8 @@ export interface EfficiencyContext {
   /** Cost of one machine in the objective, next to raw material cost (0: raw cost only) */
   machineWeight: number;
   cauldronBuyInputs: boolean;
+  /** Only these cauldron recipes (second pass: one mix per material) */
+  cauldronOnly?: Set<string>;
 }
 
 export interface LPSolution {

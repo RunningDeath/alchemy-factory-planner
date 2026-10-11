@@ -38,7 +38,23 @@ export function calculateProductionLP(config: PlannerConfig): ProductionNode[] {
   console.log("[LP Planner] Model built with", Object.keys(model.variables).length, "variables");
 
   // Solve the LP
-  const solution = solve(model);
+  let solution = solve(model);
+
+  // Cauldron: the LP may blend several mixes for one material, each with its own chain.
+  // Keep the most used mix per material and solve again: one cauldron recipe each
+  if (ctx.useCauldron && solution.status === "optimal") {
+    const best = new Map<string, { id: string; rate: number }>();
+    for (const [name, value] of solution.variables) {
+      if (!name.startsWith("recipe_cauldron-") || value <= 0) continue;
+      const id = name.slice("recipe_".length);
+      const output = id.slice("cauldron-".length).split("-")[0];
+      if ((best.get(output)?.rate ?? 0) < value) best.set(output, { id, rate: value });
+    }
+    if (best.size > 0) {
+      const narrowed = solve(buildLPModel(config, { ...ctx, cauldronOnly: new Set([...best.values()].map((b) => b.id)) }));
+      if (narrowed.status === "optimal") solution = narrowed;
+    }
+  }
   console.log("[LP Planner] Solution status:", solution.status);
 
   if (solution.status !== "optimal") {

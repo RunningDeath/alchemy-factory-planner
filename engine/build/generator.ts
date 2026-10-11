@@ -22,9 +22,11 @@
  */
 import { beltPieceFor } from "./belt-pieces";
 import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, STACKS_ON_ITSELF, type Rotation } from "./footprint";
-import { buildOccupancy, placementPorts, type Placement } from "./layout";
+import { buildOccupancy, placementCells, placementPorts, type Placement } from "./layout";
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
+import { isFluidItem } from "../belt-analysis";
+import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
 import deviceMetadata from "../../data/device-metadata.json";
 import { flowRows, nearFeeders, packBlocks, transformBlock } from "./packing";
@@ -592,7 +594,7 @@ function buildTier(
     placements.push(...belts);
 
     // Heated machines stand on a platform of steam heaters or stone stoves
-    const platform = step.heating ? heatingPlatform(step, shape.width, shape.depth, origin, count, step.deviceId) : null;
+    const platform = step.heating ? heatingPlatform(step, shape.width, shape.depth, origin, machines, step.deviceId) : null;
     if (platform) placements.push(...platform.placements);
 
     // Beam ends rest on lab stand pillars; upper belts rest on beams, elsewhere on pillars too
@@ -789,7 +791,7 @@ function pipeEndFor(step: ModuleStep): Placement["pipeEnd"] {
  * Stoves: rows in pairs facing a fuel belt row between them, as players build it.
  * The platform covers the whole block, so machines and lanes stand on it.
  */
-function heatingPlatform(step: ModuleStep, width: number, depth: number, origin: { x: number; y: number; z: number }, machines: number, deviceId: string) {
+function heatingPlatform(step: ModuleStep, width: number, depth: number, origin: { x: number; y: number; z: number }, machines: Placement[], deviceId: string) {
     const heating = step.heating!;
     const placements: Placement[] = [];
     const belts: Placement[] = [];
@@ -797,43 +799,64 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
     const top = origin.y;
     let devices = 0;
     let platformDepth = 0;
+    // Only where a machine stands: cells under the machines' foundations
+    const heatedCells = new Set(
+        machines.flatMap((m) => placementCells(m).filter((c) => c.foundation && c.z === origin.z).map((c) => `${c.x},${c.y}`)),
+    );
+    const underMachine = (x: number, y: number) => {
+        for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) if (heatedCells.has(`${x + dx},${y + dy}`)) return true;
+        return false;
+    };
 
     if (heating.kind === "steam") {
         const rows = Math.ceil(depth / 3);
         for (let r = 0; r < rows; r++) {
+            let first = true;
             for (let c = 0; c < cols; c++) {
-                const heater: Placement = { uid: nextUid("h"), id: STEAM_HEATER_ID, x: origin.x + c * 3, y: top + r * 3, z: 0, rot: 0 };
+                const x = origin.x + c * 3;
+                const y = top + r * 3;
+                if (!underMachine(x, y)) continue;
+                const heater: Placement = { uid: nextUid("h"), id: STEAM_HEATER_ID, x, y, z: 0, rot: 0 };
                 // The first heater of a row takes the steam; the rest get it through their neighbour
-                if (c === 0) heater.pipeEnd = { kind: "in", items: [{ itemName: heating.fuelItem, rate: heating.fuelRate / rows }] };
+                if (first) heater.pipeEnd = { kind: "in", items: [{ itemName: heating.fuelItem, rate: heating.fuelRate / rows }] };
+                first = false;
                 placements.push(heater);
                 devices++;
+                platformDepth = Math.max(platformDepth, (r + 1) * 3);
             }
         }
-        platformDepth = rows * 3;
     } else {
         const fuelRows: number[] = [];
         for (let u = 0; u * STOVE_UNIT < depth; u++) {
             const y0 = u * STOVE_UNIT;
             const lower = y0 + FUEL_ROW + 1 < depth;
+            const upperAt = new Set<number>();
+            const lowerAt = new Set<number>();
             for (let c = 0; c < cols; c++) {
-                placements.push({ uid: nextUid("h"), id: STOVE_ID, x: origin.x + c * 3, y: top + y0, z: 0, rot: 0 });
-                devices++;
-                if (lower) {
-                    placements.push({ uid: nextUid("h"), id: STOVE_ID, x: origin.x + c * 3, y: top + y0 + FUEL_ROW + 1, z: 0, rot: 2 });
+                const x = origin.x + c * 3;
+                if (underMachine(x, top + y0)) {
+                    placements.push({ uid: nextUid("h"), id: STOVE_ID, x, y: top + y0, z: 0, rot: 0 });
+                    upperAt.add(c);
+                    devices++;
+                }
+                if (lower && underMachine(x, top + y0 + FUEL_ROW + 1)) {
+                    placements.push({ uid: nextUid("h"), id: STOVE_ID, x, y: top + y0 + FUEL_ROW + 1, z: 0, rot: 2 });
+                    lowerAt.add(c);
                     devices++;
                 }
             }
+            const used = [...upperAt, ...lowerAt];
+            if (used.length === 0) continue;
             fuelRows.push(y0 + FUEL_ROW);
-            platformDepth = lower ? y0 + STOVE_UNIT : y0 + FUEL_ROW + 1;
-            // Fuel belt: in from the left, splitting up and down into every stove's fuel port
-            const lastPort = (cols - 1) * 3 + 1;
+            platformDepth = lowerAt.size ? y0 + STOVE_UNIT : y0 + FUEL_ROW + 1;
+            // Fuel belt: in from the left, splitting up and down into the stoves' fuel ports
+            const lastPort = Math.max(...used) * 3 + 1;
             for (let x = 0; x <= lastPort; x++) {
+                const c = Math.floor(x / 3);
                 const port = x % 3 === 1;
                 const outs: Side[] = [];
-                if (port) {
-                    outs.push("up");
-                    if (lower) outs.push("down");
-                }
+                if (port && upperAt.has(c)) outs.push("up");
+                if (port && lowerAt.has(c)) outs.push("down");
                 if (x < lastPort) outs.push("right");
                 const piece = beltPieceFor(["left"], outs) ?? beltPieceFor(["left"], ["right"])!;
                 const belt: Placement = { uid: nextUid("b"), id: piece.id, x: origin.x + x, y: top + y0 + FUEL_ROW, z: 1, rot: piece.rot, lane: "in", label: heating.fuelItem, nodeKey: step.nodeKey };
@@ -854,7 +877,7 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
             devices,
             fuelItem: heating.fuelItem,
             fuelRate: heating.fuelRate,
-            slotsUsed: machines * slotsRequired(deviceId),
+            slotsUsed: machines.length * slotsRequired(deviceId),
             slotsAvailable: devices * HEATER_SLOTS,
         },
     };
@@ -980,11 +1003,27 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
 }
 
 
+/** Fuel that a stone stove burns when steam heating pads aren't unlocked */
+const STOVE_FALLBACK_FUEL = "Coal";
+
+/**
+ * Heating the player can build: steam pads need their unlock, otherwise stoves (a steam
+ * plan then burns coal instead, the same heat)
+ */
+function withUnlockedHeating(step: ModuleStep, can: Capabilities): ModuleStep {
+    const heating = step.heating;
+    if (!heating || heating.kind !== "steam" || can.steam || !can.stoves) return step;
+    const heatOf = (item: string) => getItem(item)?.heat_value ?? 0;
+    const fuelItem = isFluidItem(heating.fuelItem) ? STOVE_FALLBACK_FUEL : heating.fuelItem;
+    const fuelRate = heatOf(fuelItem) > 0 ? (heating.fuelRate * heatOf(heating.fuelItem)) / heatOf(fuelItem) : heating.fuelRate;
+    return { ...step, heating: { kind: "stove", fuelItem, fuelRate } };
+}
+
 /** Lay every step out as blocks and pack them tightly on the ground */
 export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
     const can = capabilities(options.unlocks);
-    const steps = can.filters ? allSteps : allSteps.map((st) => ({ ...st, unsorted: true }));
+    const steps = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
     // Upper levels are fed by lifts; decks need beams
     const allowed = (stacking: Stacking): Stacking =>
         !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
