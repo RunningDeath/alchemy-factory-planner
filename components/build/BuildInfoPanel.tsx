@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { TierInfo } from "../../engine/build/generator";
 import type { IoPoint, RouteResult } from "../../engine/build/router";
 import { billOfMaterials, countBuildings, layoutBounds, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
-import { buildingName, isMachine, itemDisplayName } from "../../lib/buildCatalog";
+import { buildingName, isMachine, itemDisplayName, STARTER_BOX_COLOR } from "../../lib/buildCatalog";
 import { formatRate } from "../../lib/beltDisplay";
 
 interface BuildInfoPanelProps {
@@ -85,6 +85,23 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, s
                     </p>
                 )}
             </section>
+
+            {placements.filter((p) => p.starterBox).map((box) => (
+                <section key={box.uid} className="flex flex-col gap-1">
+                    <h4 className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Starter box</h4>
+                    <button
+                        onClick={() => {
+                            onSelect(box.uid);
+                            onGoToLevel(box.z);
+                        }}
+                        className="text-left cursor-pointer hover:underline"
+                        style={{ color: STARTER_BOX_COLOR }}
+                    >
+                        Red box at {box.x},{box.y} (level {box.z}): fill it once with {box.label?.replace("Starter box: ", "")} to start the module
+                    </button>
+                    <p className="text-[var(--text-muted)]">The nurseries need fertilizer before the module makes its own. After that it just passes through.</p>
+                </section>
+            ))}
 
             {routes.length > 0 && <ConnectionsSection routes={routes} io={io} />}
             {routes.length > 0 && (

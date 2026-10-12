@@ -34,6 +34,8 @@ export interface Placement {
     filterItem?: string;
     /** Purchasing portals: the item bought */
     supplyItem?: string;
+    /** The box the player fills with fertilizer once to start the module (shown red) */
+    starterBox?: boolean;
     /** Plain pipes: the sides they connect ("top"/"base" for up and down) */
     pipeSides?: (Side | VerticalFace)[];
 }

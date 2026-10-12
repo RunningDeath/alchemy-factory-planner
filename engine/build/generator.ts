@@ -30,7 +30,7 @@ import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { removeStraightLines } from "./compact";
 import { expandPairs, pairSteps, pairTiers } from "./pairs";
 import { PIPE_ID, pipeRisers } from "./pipes";
-import { addStarterBox } from "./starter";
+import { placeStarterBox, STARTER_BOX_ID } from "./starter";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -64,6 +64,8 @@ export interface ModuleStep {
     heating?: { kind: "steam" | "stove"; fuelItem: string; fuelRate: number };
     /** Byproducts stay on the output belt with the product (no filter splitter unlocked) */
     unsorted?: boolean;
+    /** Internal: makes the module's own fertilizer, so its output runs through a starter box */
+    starterBox?: boolean;
 }
 
 export interface ModuleOptions {
@@ -309,9 +311,13 @@ function blockDepth(rows: number, sy: number, rowPitch: number, heating: ModuleS
     return offsets[offsets.length - 1] + sy + 1;
 }
 
-/** Output lanes that carry two items end in a filter (2 rows) and two exit stubs (1 row) */
+/**
+ * Rows past the machines: output lanes that carry two items end in a filter (2 rows) and two
+ * exit stubs (1 row); the maker of self-made fertilizer ends in its starter box (2 rows) and
+ * the belt after it (1 row)
+ */
 function filterRows(step: ModuleStep): number {
-    return sortsOutputs(step) ? 3 : 0;
+    return sortsOutputs(step) || step.starterBox ? 3 : 0;
 }
 
 function sortsOutputs(step: ModuleStep): boolean {
@@ -511,6 +517,7 @@ function buildTier(
     const lanes: LaneInfo[] = [];
     const belts: Placement[] = [];
     const lifts: Placement[] = [];
+    let starterPlaced = false;
     let offLanePorts = 0;
     const levelsUsed = Math.max(...machines.map((m) => Math.round((m.z - origin.z) / stacking.pitch))) + 1;
     const top = origin.y;
@@ -602,6 +609,8 @@ function buildTier(
             const laneMachines = (pick: "ins" | "outs") =>
                 new Set([...byY.values()].flatMap((h) => h[pick].map((p) => p.machine.uid))).size;
             const sorted = collects && sortsOutputs(step);
+            // One starter box per block, on a ground lane (it needs to stand on something)
+            const boxHere = collects && !sorted && !!step.starterBox && !starterPlaced && z === 0;
 
             for (let y = yStart; y <= yEnd; y++) {
                 const at = byY.get(y);
@@ -615,8 +624,18 @@ function buildTier(
                 const belt: Placement = { uid: nextUid("b"), id: piece.id, x: laneX, y, z, rot: piece.rot, nodeKey: step.nodeKey, lane, label };
                 // The open ends are where the router connects the block to the rest of the module
                 if (feeds && y === yStart) belt.laneEnd = { kind: "in", items: laneItems(step.inputs, laneMachines("outs")) };
-                else if (collects && y === yEnd && !sorted) belt.laneEnd = { kind: "out", items: laneItems(step.outputs, laneMachines("ins")) };
+                else if (collects && y === yEnd && !sorted && !boxHere) belt.laneEnd = { kind: "out", items: laneItems(step.outputs, laneMachines("ins")) };
                 belts.push(belt);
+            }
+            // Self-made fertilizer: everything the nurseries get passes the box the player fills once
+            if (boxHere) {
+                starterPlaced = true;
+                lifts.push({ uid: nextUid("sb"), id: STARTER_BOX_ID, x: laneX, y: yEnd + 1, z, rot: 1, nodeKey: step.nodeKey, label: `Starter box: ${step.outputs[0].itemName}`, starterBox: true });
+                const piece = beltPieceFor(["up"], ["down"])!;
+                belts.push({
+                    uid: nextUid("b"), id: piece.id, x: laneX, y: yEnd + 3, z, rot: piece.rot, nodeKey: step.nodeKey, lane: "out", label: step.outputs[0].itemName,
+                    laneEnd: { kind: "out", items: laneItems(step.outputs, laneMachines("ins")) },
+                });
             }
 
             // Two items on an output lane: a filter sorts them onto two belts, one item each
@@ -1149,7 +1168,11 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
     const bought = options.buyRaw !== false && can.buy ? [...purchaseSteps(made, options.beltSpeed), ...made] : made;
     // A machine whose whole output goes into one machine of the next step feeds it directly
     const onBelt = new Set([...(options.finalProducts ?? []), ...(options.exportItems ?? []), ...(options.boughtItems ?? [])]);
-    const steps = pairSteps(bought, (item) => onBelt.has(item));
+    // Fertilizer the nurseries get from inside the module: its maker ends in a starter box
+    const madeHere = new Set(bought.flatMap((st) => st.outputs.map((o) => o.itemName)));
+    const ownFertilizer = new Set(bought.filter((st) => st.deviceId.includes("nursery")).flatMap((st) => st.inputs.map((i) => i.itemName)).filter((item) => madeHere.has(item) && !(options.boughtItems ?? []).includes(item)));
+    const marked = bought.map((st) => (st.outputs.length === 1 && ownFertilizer.has(st.outputs[0].itemName) ? { ...st, starterBox: true } : st));
+    const steps = pairSteps(marked, (item) => onBelt.has(item));
     // Upper levels are fed by lifts; decks need beams
     const allowed = (stacking: Stacking): Stacking =>
         !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
@@ -1534,7 +1557,8 @@ function routeAndFinish(
         // Self-made fertilizer: a box in the nurseries' feed the player fills once to start
         const made = new Set(tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))));
         const fertilizers = new Set(tiers.filter((t) => t.deviceId.includes("nursery")).flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
-        for (const item of fertilizers) if (made.has(item) && !(options.boughtItems ?? []).includes(item)) routed.placements = addStarterBox(routed.placements, item, () => nextUid("sb"));
+        // (the blocks' own box moves to the outline when a spot there feeds every nursery too)
+        for (const item of fertilizers) if (made.has(item) && !(options.boughtItems ?? []).includes(item)) routed.placements = placeStarterBox(routed.placements, item, options.maxHeight, () => nextUid("sb"));
         // Rows and columns that only pass belts straight through go before the supports get cheaper
         const compact = removeStraightLines({ placements: routed.placements, io: routed.io, tiers });
         routed.placements = finishSupports(compact.placements, can);

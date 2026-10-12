@@ -10,7 +10,7 @@ import { formatRate } from "../../lib/beltDisplay";
 import { getFootprint, rotatedSize, SIDE_OFFSET } from "../../engine/build/footprint";
 import { placementCells, type LayoutIssue, type Placement, type PortStatus } from "../../engine/build/layout";
 import { LAYER, QUAD, type Side } from "../../engine/build/types";
-import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor } from "../../lib/buildCatalog";
+import { BELT_COLORS, buildingName, carriedItem, describePlacement, isMachine, isSupport, placementColor, STARTER_BOX_COLOR } from "../../lib/buildCatalog";
 import { useGameIcons } from "../../lib/gameIcons";
 import { machineIconMeshes } from "./machineIcons";
 
@@ -255,14 +255,15 @@ function machineLabels(placements: Placement[], cutLevel: number | null, itemCol
     const cache = new Map<string, { material: THREE.SpriteMaterial; aspect: number }>();
     for (const p of placements) {
         const fp = getFootprint(p.id);
-        if (fp?.category !== "production") continue;
+        // The starter box gets a label too, seen from afar: the player has to find it once
+        if (!fp || (fp.category !== "production" && !p.starterBox)) continue;
         if (cutLevel !== null && p.z > cutLevel) continue;
         const size = rotatedSize(fp, p.rot);
         const top = cutLevel !== null ? Math.min(p.z + size.z, cutLevel + 1) : p.z + size.z;
-        const product = p.label ? shorten(p.label) : "";
-        const machine = shorten(buildingName(p.id));
+        const product = p.starterBox ? "Starter box" : p.label ? shorten(p.label) : "";
+        const machine = p.starterBox ? "fill once" : shorten(buildingName(p.id));
         const item = carriedItem(p);
-        const color = (item && itemColors.get(item)) || "#f0d078";
+        const color = p.starterBox ? STARTER_BOX_COLOR : (item && itemColors.get(item)) || "#f0d078";
         const dimmed = !!highlightItem && item !== highlightItem;
         const key = `${product}\u0000${machine}\u0000${color}\u0000${dimmed}`;
         let entry = cache.get(key);
@@ -277,7 +278,7 @@ function machineLabels(placements: Placement[], cutLevel: number | null, itemCol
         sprite.scale.set(labelWidth, labelHeight, 1);
         sprite.position.set(p.x + size.x / 2, top + 0.15 + labelHeight / 2, p.y + size.y / 2);
         sprite.renderOrder = 5;
-        sprite.userData.machineLabel = true;
+        sprite.userData.machineLabel = !p.starterBox;
         sprites.push(sprite);
     }
     return sprites;

@@ -127,7 +127,11 @@ export function showsIcons(id: string): boolean {
     return (!!category && ICON_CATEGORIES.has(category)) || ICON_SINKS.has(id);
 }
 
+/** The starter box stands out, as it does in game */
+export const STARTER_BOX_COLOR = "#e0302a";
+
 export function placementColor(p: Placement, itemColors: Map<string, string>): string {
+    if (p.starterBox) return STARTER_BOX_COLOR;
     const item = carriedItem(p);
     if (item && itemColors.has(item)) return itemColors.get(item)!;
     if (p.label && (p.label.includes(" + ") || p.label.startsWith("filter:"))) return MIXED_COLOR;

@@ -35,6 +35,8 @@ interface Record {
     seedName?: string;
     /** Cauldrons: the item each of its three input slots takes */
     cauldronFilters?: string[];
+    /** Custom colour as the game stores it (blue, green, red, alpha); unset keeps the default */
+    color?: number[];
     supplyName?: string;
 }
 
@@ -44,6 +46,12 @@ export interface BlueprintBody {
     buildingCount: number;
     warnings: string[];
 }
+
+/**
+ * The game's red, as a player-coloured box stores it (blue, green, red, alpha; uncoloured
+ * buildings keep 255,255,255,0)
+ */
+const STARTER_BOX_COLOR = [64, 64, 255, 255];
 
 /** Whether something at the cell `out` of `p` takes items in from `p` */
 function outputConnected(p: Placement, out: Side, byCell: Map<string, Placement[]>): boolean {
@@ -68,6 +76,8 @@ function plainRecord(p: Placement, fp: BuildingFootprint): Record {
         uids: [p.uid],
         filterName: p.filterItem ? gameItemName(p.filterItem) : undefined,
         supplyName: p.supplyItem ? gameItemName(p.supplyItem) : undefined,
+        // The starter box shows red in game, so the player finds it to fill it
+        color: p.starterBox ? STARTER_BOX_COLOR : undefined,
         ...machineSettings(p, fp),
     };
 }
@@ -212,6 +222,7 @@ export function placementsToBody(placements: Placement[]): BlueprintBody {
         setProp(b, "SeedName", r.seedName ?? "None");
         setProp(b, "SupplyName", r.supplyName ?? "None");
         b.filter((p) => p.name === "CauldronFilterName").forEach((p, k) => (p.value = r.cauldronFilters?.[k] ?? "None"));
+        if (r.color) setProp(b, "CustomColor", r.color);
         setPath(b, ["RelativeGridGroup", "Pivot"], pivot);
         setPath(b, ["RelativeGridGroup", "GridArea"], area);
         const pkg = getProp<Property[]>(b, "building");
