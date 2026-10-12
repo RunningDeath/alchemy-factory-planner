@@ -25,6 +25,11 @@ export interface FlowEdge {
     target: string;
     /** Rate the consumer needs from this source at full demand */
     demand: number;
+    /**
+     * A byproduct of the source (not its main output): its own stream, this many per main
+     * output, shared only among the consumers of that byproduct
+     */
+    byproduct?: { item: string; perMain: number };
 }
 
 export interface FlowTarget {
@@ -50,12 +55,19 @@ export function simulateFlow(nodes: FlowNode[], edges: FlowEdge[], targets: Flow
     const incoming = new Map<string, FlowEdge[]>();
     const outgoingDemand = new Map<string, number>();
 
+    // Demand on each output stream of a node: its main output, and each byproduct apart
+    const stream = (e: FlowEdge) => (e.byproduct ? `${e.source}|${e.byproduct.item}` : e.source);
+    const streamDemand = new Map<string, number>();
     edges.forEach((e) => {
         if (!incoming.has(e.target)) incoming.set(e.target, []);
         incoming.get(e.target)!.push(e);
-        outgoingDemand.set(e.source, (outgoingDemand.get(e.source) || 0) + e.demand);
+        streamDemand.set(stream(e), (streamDemand.get(stream(e)) || 0) + e.demand);
+        if (!e.byproduct) outgoingDemand.set(e.source, (outgoingDemand.get(e.source) || 0) + e.demand);
     });
-    targets.forEach((t) => outgoingDemand.set(t.source, (outgoingDemand.get(t.source) || 0) + t.demand));
+    targets.forEach((t) => {
+        outgoingDemand.set(t.source, (outgoingDemand.get(t.source) || 0) + t.demand);
+        streamDemand.set(t.source, (streamDemand.get(t.source) || 0) + t.demand);
+    });
 
     const realized = new Map<string, number>();
     const inputLimited = new Set<string>();
@@ -66,8 +78,9 @@ export function simulateFlow(nodes: FlowNode[], edges: FlowEdge[], targets: Flow
     const allocated = (e: FlowEdge): number => {
         const source = byKey.get(e.source);
         if (!source || source.isRaw || backEdges.has(e.key)) return Infinity;
-        const total = outgoingDemand.get(e.source) || 0;
-        return total > RATE_EPSILON ? resolve(e.source) * (e.demand / total) : 0;
+        const total = streamDemand.get(stream(e)) || 0;
+        const made = resolve(e.source) * (e.byproduct?.perMain ?? 1);
+        return total > RATE_EPSILON ? made * (e.demand / total) : 0;
     };
 
     function resolve(key: string): number {
@@ -100,14 +113,37 @@ export function simulateFlow(nodes: FlowNode[], edges: FlowEdge[], targets: Flow
 
     const edgeOffered = new Map<string, number>(edges.map((e) => [e.key, allocated(e)]));
 
-    // Consumers draw their inputs in proportion to what they actually make
-    const edgeActual = new Map<string, number>();
+    // Consumers draw their inputs in proportion to what they actually make and pass on:
+    // output nobody takes backs up and the machine waits (a rounded-up nursery doesn't eat
+    // fertilizer for flax nobody uses)
+    const outgoing = new Map<string, FlowEdge[]>();
     edges.forEach((e) => {
-        const consumer = byKey.get(e.target);
-        const made = realized.get(e.target);
-        const ratio = consumer && made !== undefined && consumer.demand > RATE_EPSILON ? made / consumer.demand : 1;
-        edgeActual.set(e.key, e.demand * ratio);
+        if (!e.byproduct) outgoing.set(e.source, [...(outgoing.get(e.source) ?? []), e]);
     });
+    const hasTarget = new Set(targets.map((t) => t.source));
+    // How much of a node's main output is taken: all of it when it feeds a target or
+    // nothing (end of the line), else what its consumers really draw
+    const takenMemo = new Map<string, number>();
+    const takenVisiting = new Set<string>();
+    const takenOf = (key: string): number => {
+        const made = realized.get(key) ?? 0;
+        if (takenMemo.has(key)) return takenMemo.get(key)!;
+        const outs = outgoing.get(key) ?? [];
+        if (hasTarget.has(key) || outs.length === 0 || takenVisiting.has(key)) return made;
+        takenVisiting.add(key);
+        const drawn = outs.reduce((sum, e) => sum + draw(e), 0);
+        takenVisiting.delete(key);
+        const taken = Math.min(made, drawn);
+        takenMemo.set(key, taken);
+        return taken;
+    };
+    function draw(e: FlowEdge): number {
+        const consumer = byKey.get(e.target);
+        if (!consumer || consumer.demand <= RATE_EPSILON) return e.demand;
+        return e.demand * (takenOf(e.target) / consumer.demand);
+    }
+    const edgeActual = new Map<string, number>();
+    edges.forEach((e) => edgeActual.set(e.key, draw(e)));
 
     // Raw supply shows what was actually drawn
     nodes.forEach((n) => {

@@ -1708,7 +1708,8 @@ function joinModules(
     const surplus = new Map<string, number>();
     // Lane ends at a module's edge are owned by the whole module, named after the blocks
     const moduleBase = subs.reduce((sum, m) => sum + m.tiers.length, 0);
-    const isEdge = (p: IoPoint) => p.kind === "import" || p.kind === "export";
+    // A module's leftover exits (no sink fitted) stay its own business, not a belt to another module
+    const isEdge = (p: IoPoint) => p.kind === "import" || (p.kind === "export" && !p.dispose);
     subs.forEach((sub, k) => {
         if (sub.placements.length === 0) return;
         const b = cellBounds(sub.placements);

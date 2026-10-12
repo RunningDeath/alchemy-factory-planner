@@ -39,8 +39,8 @@ describe("simulateFlow", () => {
     );
     expect(r.realized.get("gear")).toBeCloseTo(55, 6);
     expect(r.delivered[0]).toBeCloseTo(55, 6);
-    // Plate runs at its full 120 (raw is unlimited); gear uses 110 of it, 10 plates spare
-    expect(r.realized.get("ore")).toBeCloseTo(120, 6);
+    // Plate could make 120 (raw is unlimited); gear takes 110, so plate only draws ore for those
+    expect(r.realized.get("ore")).toBeCloseTo(110, 6);
     expect(r.edgeActual.get("plate>gear")).toBeCloseTo(110, 6);
   });
 

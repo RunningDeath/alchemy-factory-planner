@@ -776,7 +776,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             const exportTrees = [...nodes.values()].filter((n) => n.tree === treeName && !n.lift && n.items.size === 1);
             // Leftovers for a sink may leave through the sides too; everything else front or back
             const sides = conn.dispose || (options.sideExit?.(conn.itemName) ?? false);
-            estimate = (c) => (sides ? Math.min(c[0] - minX, maxX - c[0], maxY - c[1]) : maxY - c[1]) + c[2];
+            estimate = (c) => (conn.dispose ? Math.min(c[0] - minX, maxX - c[0]) : sides ? Math.min(c[0] - minX, maxX - c[0], maxY - c[1]) : maxY - c[1]) + c[2];
             // One belt out per item: join the item's export belt while it has room, a new exit only otherwise
             const joinable = exportTrees.some((n) => (treeTotals.get(n.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6);
             goal = (cell, heading) => {
@@ -788,7 +788,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                     }
                     return null;
                 }
-                if (onEdge(cell) && nextCell[1] > maxY) return { kind: "edge" };
+                // Leftovers for a sink leave through a side: the back is where the next module's belts are
+                if (!conn.dispose && onEdge(cell) && nextCell[1] > maxY) return { kind: "edge" };
                 if (sides && cell[2] === 0 && (nextCell[0] < minX || nextCell[0] > maxX) && (cell[0] === minX || cell[0] === maxX)) return { kind: "edge" };
                 const m = nodes.get(keyOf(nextCell));
                 if (m && exportTrees.includes(m) && (treeTotals.get(m.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6 && canAdd(m, oppositeSide(heading), "in")) {

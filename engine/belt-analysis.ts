@@ -106,6 +106,20 @@ const recipesById = new Map<string, Recipe>(
   (recipesData as unknown as Recipe[]).map((r) => [r.id, r]),
 );
 
+/**
+ * The byproduct an edge carries when the consumer doesn't use the source's main output
+ * but one of its other outputs (sand from crushing rock salt), per main output
+ */
+function byproductOf(source?: NodeBeltInfo, target?: NodeBeltInfo): FlowEdge["byproduct"] {
+  if (!source || !target || source.perMachineOutputs.length < 2) return undefined;
+  const wanted = new Set(target.perMachineInputs.map((f) => f.itemName));
+  if (wanted.has(source.itemName)) return undefined;
+  const main = source.perMachineOutputs.find((o) => o.itemName === source.itemName);
+  const other = source.perMachineOutputs.find((o) => o.itemName !== source.itemName && wanted.has(o.itemName));
+  if (!main || !other || main.perMachineRate <= 0) return undefined;
+  return { item: other.itemName, perMain: other.perMachineRate / main.perMachineRate };
+}
+
 /** Items that travel through pipes, based on item category. */
 export function isFluidItem(itemRef: string): boolean {
   const item = getItem(itemRef);
@@ -328,7 +342,7 @@ export function analyzeBelts(
   }));
   const flowEdges: FlowEdge[] = Array.from(graph.edgeRates.entries()).map(([key, demand]) => {
     const [source, target] = splitEdgeKey(key);
-    return { key, source, target, demand };
+    return { key, source, target, demand, byproduct: byproductOf(nodes[source], nodes[target]) };
   });
   const targetList = roots.map((r) => ({ nodeKey: nodeKeyOf(r), itemName: r.itemName, demand: r.netOutputRate ?? r.rate }));
   const flow = simulateFlow(
