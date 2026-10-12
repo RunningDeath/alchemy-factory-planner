@@ -27,6 +27,7 @@ import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./su
 import { buildTowers, type Tower } from "./towers";
 import { attachDisposal, type Disposal } from "./disposal";
 import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
+import { removeStraightLines } from "./compact";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -1027,9 +1028,10 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
 
     const width = 1 + columns * CAULDRON_PITCH;
     const depth = 5;
+    // Every cauldron has a belt per input and one out (the rates are per cauldron)
     const lanes: LaneInfo[] = [
-        laneInfo("in", 0, 0, baseZ + 1, step.inputs, count, opts.beltSpeed),
-        laneInfo("out", width - 1, 0, baseZ + 1, step.outputs, count, opts.beltSpeed),
+        ...portItems.map((flow) => laneInfo("in", 0, 0, baseZ + 1, [flow], 1, opts.beltSpeed)),
+        laneInfo("out", width - 1, 0, baseZ + 1, step.outputs, 1, opts.beltSpeed),
     ];
     return {
         placements,
@@ -1472,7 +1474,13 @@ function routeAndFinish(
     const disposed = attachDisposal(routed.placements, routed.io, (item) => finals.has(item) || products.has(item) || chosen.has(item), disposalFor(options, can), () => nextUid("x"));
     routed.placements = disposed.placements;
     routed.io = disposed.io;
-    if (finish) routed.placements = finishSupports(routed.placements, can);
+    if (finish) {
+        // Rows and columns that only pass belts straight through go before the supports get cheaper
+        const compact = removeStraightLines({ placements: routed.placements, io: routed.io, tiers });
+        routed.placements = finishSupports(compact.placements, can);
+        routed.io = compact.io;
+        tiers = compact.tiers;
+    }
     return { placements: routed.placements, tiers, size: moduleSize(routed.placements), routes: routed.routes, io: routed.io, surplus: routed.surplus, locked: [] };
 }
 
@@ -1545,6 +1553,7 @@ const MODULE_GAP = 2;
 /** Widest a module of a grouped layout may get (one wooden floor) */
 const MODULE_MAX_WIDTH = 16;
 const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
+    { mode: "column", perBelt: 0 },
     { mode: "column", perBelt: 1 },
     { mode: "column", perBelt: 2 },
     { mode: "row", perBelt: 1 },
