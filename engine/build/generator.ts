@@ -21,7 +21,7 @@
  * the blocks to each other is left to the player.
  */
 import { beltPieceFor } from "./belt-pieces";
-import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, STACKS_ON_ITSELF, type Rotation } from "./footprint";
+import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, SIDE_OFFSET, STACKS_ON_ITSELF, type Rotation } from "./footprint";
 import { buildOccupancy, cellKey, placementCells, placementPorts, type Placement } from "./layout";
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
@@ -303,8 +303,8 @@ function sortsOutputs(step: ModuleStep): boolean {
 }
 
 function maxLevelsFor(step: ModuleStep, fp: BuildingFootprint, stacking: Stacking, opts: ModuleOptions): number {
-    // A sorting filter is two cells tall, so machines with byproducts stay on one level
-    if (stacking.kind === "none" || filterRows(step) > 0) return 1;
+    // A sorting filter is two cells tall: machines with byproducts stack only when a level is taller
+    if (stacking.kind === "none" || (filterRows(step) > 0 && stacking.pitch < 3)) return 1;
     const byHeight = Math.floor((opts.maxHeight - fp.size.z) / stacking.pitch) + 1;
     return Math.max(1, Math.min(opts.maxStack, byHeight));
 }
@@ -597,11 +597,20 @@ function buildTier(
             if (sorted) {
                 const [first, second] = step.outputs;
                 const served = laneMachines("ins");
-                lifts.push({ uid: nextUid("x"), id: "filter-vert", x: laneX, y: yEnd + 1, z, rot: rotFor("left", "up"), nodeKey: step.nodeKey, filterItem: first.itemName, label: `filter: ${first.itemName}` });
+                // The flat filter (one level high) so stacked levels each get their own;
+                // its two outputs leave side by side, one item each
+                const filter = flatFilter(laneX, yEnd + 1, z, placements.concat(lifts, belts));
+                const base = { uid: nextUid("x"), nodeKey: step.nodeKey, filterItem: first.itemName, label: `filter: ${first.itemName}` };
+                const placed: Placement = filter ? { ...base, ...filter } : { ...base, id: "filter-vert", x: laneX, y: yEnd + 1, z, rot: rotFor("left", "up") };
+                lifts.push(placed);
+                const outs = placementPorts(placed).filter((q) => q.dir === "out");
                 for (const [k, out] of [first, second].entries()) {
-                    const piece = beltPieceFor(["up"], ["down"])!;
+                    const port = outs[k];
+                    const face = port.face as Side;
+                    const [tx, ty] = SIDE_OFFSET[face];
+                    const piece = beltPieceFor([oppositeSide(face)], [face])!;
                     belts.push({
-                        uid: nextUid("b"), id: piece.id, x: laneX, y: yEnd + 3, z: z + k, rot: piece.rot, nodeKey: step.nodeKey, lane: "out", label: out.itemName,
+                        uid: nextUid("b"), id: piece.id, x: port.x + tx, y: port.y + ty, z: port.z, rot: piece.rot, nodeKey: step.nodeKey, lane: "out", label: out.itemName,
                         laneEnd: { kind: "out", items: laneItems([out], served) },
                     });
                 }
@@ -631,8 +640,11 @@ function buildTier(
         for (const endX of [d.x, d.x + length - 1]) placements.push(...supportColumn(occupancy, endX, d.y, d.z, 0, makeUid));
     }
     const liftBottoms = fed.lifts.filter((l) => l.id === "conveyer-lift-upwards");
-    const raised = [...belts, ...liftBottoms, ...(platform?.belts ?? [])].filter((bb) => bb.z > 0).sort((a, c) => a.z - c.z);
-    for (const b of raised) placements.push(...supportColumn(occupancy, b.x, b.y, b.z, 0, makeUid));
+    const filters = lifts.filter((l) => l.id.startsWith("filter"));
+    const raised = [...belts, ...liftBottoms, ...filters, ...(platform?.belts ?? [])].filter((bb) => bb.z > 0).sort((a, c) => a.z - c.z);
+    // Every bottom cell (a flat filter covers four)
+    for (const b of raised)
+        for (const c of placementCells(b).filter((c) => c.z === b.z && c.foundation)) placements.push(...supportColumn(occupancy, c.x, c.y, c.z, 0, makeUid));
 
     return {
         placements,
@@ -660,6 +672,24 @@ function buildTier(
             mixedInputs: step.inputs.length >= 2 && !feed.separate,
         },
     };
+}
+
+/**
+ * A flat filter splitter taking the lane's items at (x, y, z) from above (moving down),
+ * placed where it doesn't overlap what is there; null if none fits
+ */
+function flatFilter(x: number, y: number, z: number, around: Placement[]): Pick<Placement, "id" | "x" | "y" | "z" | "rot"> | null {
+    const occupied = new Set(around.flatMap((p) => placementCells(p).map((c) => `${c.x},${c.y},${c.z}`)));
+    for (const id of ["filter", "filter-sym"])
+        for (const rot of [0, 1, 2, 3] as Rotation[])
+            for (const ox of [0, -1])
+                for (const oy of [0, -1]) {
+                    const p: Placement = { uid: "", id, x: x + ox, y: y + oy, z, rot };
+                    const takes = placementPorts(p).some((q) => q.dir === "in" && q.x === x && q.y === y && q.z === z && q.face === "up");
+                    const outsDown = placementPorts(p).filter((q) => q.dir === "out").every((q) => q.face === "down");
+                    if (takes && outsDown && placementCells(p).every((c) => !occupied.has(`${c.x},${c.y},${c.z}`))) return { id, x: p.x, y: p.y, z, rot };
+                }
+    return null;
 }
 
 /** An input lane before its pieces are laid: column, height and the rows it feeds */

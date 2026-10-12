@@ -202,7 +202,8 @@ describe("separate inputs, filters and heating", () => {
       options,
     );
     expect(validateLayout(mod.placements)).toEqual([]);
-    const filters = mod.placements.filter((p) => p.id === "filter-vert");
+    // The flat filter where it fits (stacked levels each get one), else the tall one
+    const filters = mod.placements.filter((p) => p.id.startsWith("filter"));
     expect(filters.length).toBeGreaterThan(0);
     expect(filters.every((f) => f.filterItem === "Dust")).toBe(true);
     expect(mod.routes.every((r) => r.ok)).toBe(true);
