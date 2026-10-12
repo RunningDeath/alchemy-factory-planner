@@ -186,16 +186,23 @@ export function assignFlows(
         const totalDemand = demand.reduce((a, b) => a + b, 0);
         if (producers.length > 0 && totalDemand > totalSupply) demand.forEach((d, k) => (demand[k] = (d * totalSupply) / totalDemand));
 
+        // Made here, used here and sent out too (self-made fertilizer): every producer feeds its
+        // share of the module first, so each gets a priority splitter and only leftovers leave
+        const shared = producers.length > 1 && consumers.length > 0 && totalSupply > totalDemand + 1e-6 && (exportable?.(itemName) ?? true);
+        const quota = shared ? supply.map((s) => (s * totalDemand) / totalSupply) : [...supply];
         let i = 0;
         let j = 0;
         while (i < producers.length && j < consumers.length) {
-            const f = Math.min(supply[i], demand[j]);
+            const f = Math.min(quota[i], demand[j]);
             if (f > 1e-6) connections.push({ itemName, rate: f, from: producers[i], to: consumers[j] });
+            quota[i] -= f;
             supply[i] -= f;
             demand[j] -= f;
-            if (supply[i] <= 1e-6) i++;
+            if (quota[i] <= 1e-6) i++;
             if (demand[j] <= 1e-6) j++;
         }
+        // What the producers have left goes on below
+        i = 0;
         for (; j < consumers.length; j++) if (demand[j] > 1e-6) connections.push({ itemName, rate: demand[j], from: "import", to: consumers[j] });
         // Capped items: up to the cap leaves for whoever needs it, the rest goes to a sink
         let cap = caps?.get(itemName) ?? Infinity;
