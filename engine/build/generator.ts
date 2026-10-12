@@ -1464,11 +1464,15 @@ const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
  * outputs at its back), then the modules are set out (see ModuleArrangement) and belted
  * together.
  */
-function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: ModuleOptions): GeneratedModule {
+function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], options: ModuleOptions): GeneratedModule {
     const can = capabilities(options.unlocks);
+    // All purchasing portals in one module at the start of the line, where the coins come
+    // in; the other modules get their raw materials from it by belt
+    const portals = options.buyRaw !== false && can.buy ? purchaseSteps(allSteps, options.beltSpeed) : [];
+    const groups: StepGroup[] = portals.length ? [{ steps: portals, tower: false }, ...chosenGroups] : chosenGroups;
     const stages = groups.length + MODULE_ARRANGEMENTS.length;
     const report = (done: number, label: string) => (f: number, l: string) => options.onProgress?.((done + f) / stages, l ? `${label}: ${l}` : label);
-    const products = groups.map((g) => (g.tower ? g.steps[g.steps.length - 1].itemName : "other steps"));
+    const products = groups.map((g, k) => (portals.length && k === 0 ? "purchasing" : g.tower ? g.steps[g.steps.length - 1].itemName : "other steps"));
     const started = Date.now();
     const subs = groups.map((group, k) => {
         // What other modules use leaves at the back, once this module's own machines took theirs
@@ -1480,6 +1484,8 @@ function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: M
             maxWidth: Math.min(options.maxWidth, MODULE_MAX_WIDTH),
             moduleGroups: undefined,
             stackBlocks: group.tower || options.stackBlocks,
+            // The portals have their own module
+            buyRaw: portals.length ? false : options.buyRaw,
             exportItems: [...new Set([...(options.exportItems ?? []), ...sent])],
             onProgress: options.onProgress && report(k, `Module of ${products[k]}`),
         };

@@ -443,7 +443,9 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                     (c) => inBounds(c) && !reserved.has(keyOf(c)) && !nodes.has(keyOf(c)) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0),
                 );
                 const support = supports(n);
-                if (postFree && support !== null && cells.slice(1).every((c) => beltFree(c))) {
+                // A bridge only pays where plain belts would need supports under them (up in the air)
+                const saves = n[2] > 0 && cells.slice(1).some((c) => (supports(c) ?? 1) > 0);
+                if (saves && postFree && support !== null && cells.slice(1).every((c) => beltFree(c))) {
                     const last = cells[cells.length - 1];
                     const node: SearchNode = {
                         cell: last,

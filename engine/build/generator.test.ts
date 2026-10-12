@@ -83,13 +83,13 @@ describe("generateModule", () => {
     expect(mod.placements.some((p) => p.id === "frame-single")).toBe(true);
   });
 
-  test("steps sit side by side on the ground; nurseries stack on beam decks; one storey high", () => {
+  test("without block stacking, steps sit side by side on the ground; nurseries stack on beam decks; one storey high", () => {
     const mod = generateModule(
       [
         step({ nodeKey: "a", deviceId: "nursery", machines: 8, inputs: [{ itemName: "Growth Potion", perMachineRate: 1 }], outputs: [{ itemName: "Flax", perMachineRate: 165 }] }),
         step({ nodeKey: "b", machines: 3, inputs: [{ itemName: "Flax Fiber", perMachineRate: 30 }], outputs: [{ itemName: "Linen", perMachineRate: 10 }] }),
       ],
-      options,
+      { ...options, stackBlocks: false },
     );
     expect(mod.tiers.every((t) => t.z === 0)).toBe(true);
     expect(mod.size[2]).toBeLessThanOrEqual(16);

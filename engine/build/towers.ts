@@ -46,14 +46,14 @@ interface TowerOptions {
 }
 
 /** Upper block must save at least this share of its own floor */
-const MIN_SAVING = 0.3;
+const MIN_SAVING = 0.15;
 /** How far an upper block may reach past the tower's edge */
 const OVERHANG = 3;
 /** Score per support column cell (wood is cheap, but a forest of columns isn't) */
-const SUPPORT_COST = 0.3;
+const SUPPORT_COST = 0.1;
 const RELATED_BONUS = 6;
 /** Per level up: high blocks mean long lifts and belts on tall columns */
-const HEIGHT_COST = 2;
+const HEIGHT_COST = 0.5;
 
 /**
  * Lane ends a connecting belt can't reach: the cell in front of the end is taken, or (up
