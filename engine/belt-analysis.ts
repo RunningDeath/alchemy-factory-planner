@@ -183,7 +183,8 @@ export function perMachineFlows(
     if (fertilizer?.nutrient_value && plant?.required_nutrients && outputs[0]) {
       inputs.push({
         itemName: fertilizer.name,
-        rate: (outputs[0].rate * plant.required_nutrients) / fertilizer.nutrient_value,
+        // Fertilizer Efficiency raises the nutrients each fertilizer item gives
+        rate: (outputs[0].rate * plant.required_nutrients) / (fertilizer.nutrient_value * ctx.fertilizerMultiplier),
       });
     }
   }

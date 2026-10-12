@@ -191,7 +191,8 @@ export function checkMachineFlow(
 /**
  * Output of one nursery in items/min:
  * min(belt speed, fertilizer V/s ÷ plant V per item × 60 × factory multiplier).
- * `fertilizerMultiplier` is the Fertilizer Efficiency research bonus (1 = none).
+ * `fertilizerMultiplier` (Fertilizer Efficiency) raises the nutrients per fertilizer item, not the
+ * growth speed: it doesn't change the output.
  */
 export function nurseryOutputPerMachine(
   fertilizerNutrientsPerSecond: number,
@@ -201,6 +202,7 @@ export function nurseryOutputPerMachine(
   fertilizerMultiplier = 1,
 ): number {
   const uncapped =
-    (fertilizerNutrientsPerSecond * fertilizerMultiplier) / plantNutrientsPerItem * 60 * speedMultiplier;
+    (fertilizerNutrientsPerSecond / plantNutrientsPerItem) * 60 * speedMultiplier;
+  void fertilizerMultiplier;
   return Math.min(beltSpeed, uncapped);
 }

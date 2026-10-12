@@ -362,7 +362,8 @@ function calculateItemFlows(
         const outputCount = typeof recipe.outputs[0].count === "string"
           ? parseFloat(recipe.outputs[0].count)
           : recipe.outputs[0].count;
-        const effectiveNutrientValue = fertilizerItem.nutrient_value;
+        // Fertilizer Efficiency raises the nutrients each fertilizer item gives
+        const effectiveNutrientValue = fertilizerItem.nutrient_value * ctx.fertilizerMultiplier;
         const fertilizerPerActivation = (outputCount * outputItem.required_nutrients) / effectiveNutrientValue;
         const rate = activationRate * fertilizerPerActivation;
 

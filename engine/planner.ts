@@ -251,7 +251,8 @@ function solveNode(
             // Fertilizer consumption: nutrients are per OUTPUT ITEM, not per cycle
             // - Each Flax needs 24 nutrients
             // - Fertilizer per Flax = 24 / 144 = 0.1667 units
-            const fertNeededPerItem = item.required_nutrients / nutrientValue;
+            // Fertilizer Efficiency raises the nutrients each fertilizer item gives
+            const fertNeededPerItem = item.required_nutrients / (nutrientValue * (1 + ctx.fertilizerEfficiency * 0.1));
             const totalFertilizerRate = neededRate * fertNeededPerItem;
 
             fertilizerInput = {

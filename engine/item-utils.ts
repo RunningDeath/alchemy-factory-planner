@@ -78,7 +78,11 @@ function getNurseryGrowthTime(
   const nutrientsPerCycle = recipe.outputs.reduce((sum, o) => {
     return sum + parseCount(o) * (getItem(o.id || o.name)?.required_nutrients || 0);
   }, 0);
-  return nutrientsPerCycle > 0 ? nutrientsPerCycle / (nutrientsPerSec * fertilizerMultiplier) : recipe.time;
+  // The Fertilizer Efficiency bonus raises the nutrient value per fertilizer item (fewer items
+  // eaten), not how fast a nursery takes nutrients in: growth speed is the fertilizer's own
+  // (checked in game: a Growth Potion lasts 6480 x 1.1 / 1980 = 3.6 s in a belt-capped nursery)
+  void fertilizerMultiplier;
+  return nutrientsPerCycle > 0 ? nutrientsPerCycle / nutrientsPerSec : recipe.time;
 }
 
 function parseCount(o: { count: number | string }): number {
