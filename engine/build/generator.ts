@@ -79,6 +79,8 @@ export interface ModuleOptions {
     exportItems?: string[];
     /** Bought fertilizer/fuel: machines that use it get it from outside even when the module makes it as a product */
     boughtItems?: string[];
+    /** Most of an item sent out (what other modules need); the rest goes to a sink in this module */
+    exportCaps?: Map<string, number>;
     /** The player's level and unlocks; only those buildings are used. Absent: everything */
     unlocks?: BuildUnlocks;
     /** Put small blocks on top of others to save floor (default: yes) */
@@ -1401,6 +1403,7 @@ function routeAndFinish(
               exportable: (item) => finals.has(item) || products.has(item) || chosen.has(item) || leftovers.has(item),
               sideExit: (item) => leftovers.has(item) && !finals.has(item) && !chosen.has(item),
               bought: (item) => (options.boughtItems ?? []).includes(item),
+              exportCaps: options.exportCaps,
           })
         : { placements: [], routes: [], io: [], surplus: [] };
     // Byproducts nobody takes end in a knowledge altar, trash barrel or dispatch portal
@@ -1508,6 +1511,11 @@ function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], opti
         // What other modules use leaves at the back, once this module's own machines took theirs
         const usedElsewhere = new Set(allSteps.filter((st) => !group.steps.includes(st)).flatMap((st) => [...st.inputs.map((i) => i.itemName), st.heating?.fuelItem ?? ""]));
         const sent = group.steps.flatMap((st) => st.outputs.map((o) => o.itemName)).filter((item) => usedElsewhere.has(item));
+        // Byproducts other modules use: send what they need, the rest to a sink in this module
+        const others = allSteps.filter((st) => !group.steps.includes(st));
+        const needElsewhere = (item: string) => others.reduce((sum, st) => sum + st.inputs.filter((i) => i.itemName === item).reduce((s, i) => s + i.perMachineRate * st.machines, 0), 0);
+        const groupLeftovers = leftoversOf(group.steps);
+        const exportCaps = new Map(sent.filter((item) => groupLeftovers.has(item)).map((item) => [item, needElsewhere(item)]));
         const opts: ModuleOptions = {
             ...options,
             // Narrow modules: they grow up into towers instead of out
@@ -1517,6 +1525,7 @@ function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], opti
             // The portals have their own module
             buyRaw: portals.length ? false : options.buyRaw,
             exportItems: [...new Set([...(options.exportItems ?? []), ...sent])],
+            exportCaps,
             onProgress: options.onProgress && report(k, `Module of ${products[k]}`),
         };
         return generateBlocks(group.steps, opts, TIME_BUDGET_MS / stages, false);
@@ -1531,7 +1540,10 @@ function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], opti
     const orderedFeeds = order.map((i) => order.map((j) => feeds[i][j]));
     const boxes = ordered.map((sub) => cellBounds(sub.placements));
 
-    const leftovers = leftoversOf(allSteps);
+    // A module that sinks a leftover itself already takes what the next module leaves on the
+    // belt (its priority splitter sends the rest to its sink): no second sink between modules
+    const sunkInModules = new Set(subs.flatMap((sub) => sub.io.filter((p) => p.kind === "altar" || p.kind === "trash" || p.kind === "sell").map((p) => p.itemName)));
+    const leftovers = new Set([...leftoversOf(allSteps)].filter((item) => !sunkInModules.has(item)));
     const failed = (m: GeneratedModule) => m.routes.filter((r) => !r.ok).length;
     let best: GeneratedModule | null = null;
     for (const [a, arrangement] of MODULE_ARRANGEMENTS.entries()) {

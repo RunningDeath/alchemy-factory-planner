@@ -45,6 +45,8 @@ export interface RouteResult {
 export interface IoPoint {
     /** altar / trash / sell: an unneeded item ends in a knowledge altar, trash barrel or dispatch portal there */
     kind: "import" | "export" | "altar" | "trash" | "sell";
+    /** An export that should end in a sink (left over past its export cap) */
+    dispose?: boolean;
     itemName: string;
     cell: Cell;
     rate: number;
@@ -69,6 +71,8 @@ export interface RouterOptions {
     bridges?: boolean;
     /** Items whose unused output leaves the module (the rest stays in the line); default: all */
     exportable?: (itemName: string) => boolean;
+    /** Most of an item that leaves for other modules; the rest goes to a sink (byproducts shared with other modules) */
+    exportCaps?: Map<string, number>;
     /** Items whose consumers import them although the module makes them (bought fertilizer/fuel that is also a target) */
     bought?: (itemName: string) => boolean;
     /** Items that may also leave through the module's sides (leftovers for a sink), not only front and back */
@@ -138,6 +142,8 @@ interface Connection {
     rate: number;
     from: LaneEnd | "import";
     to: LaneEnd | "export";
+    /** Export of what is left over past an export cap: ends in a sink next to the module */
+    dispose?: boolean;
 }
 
 /** Match producers to consumers per item; the rest is imported or exported */
@@ -154,6 +160,7 @@ export function assignFlows(
     exportable?: (itemName: string) => boolean,
     surplus?: { itemName: string; rate: number }[],
     bought?: (itemName: string) => boolean,
+    caps?: Map<string, number>,
 ): Connection[] {
     const items = new Set(ends.flatMap((e) => e.items.map((i) => i.itemName)));
     const connections: Connection[] = [];
@@ -186,10 +193,18 @@ export function assignFlows(
             if (demand[j] <= 1e-6) j++;
         }
         for (; j < consumers.length; j++) if (demand[j] > 1e-6) connections.push({ itemName, rate: demand[j], from: "import", to: consumers[j] });
+        // Capped items: up to the cap leaves for whoever needs it, the rest goes to a sink
+        let cap = caps?.get(itemName) ?? Infinity;
         for (; i < producers.length; i++) {
             if (supply[i] <= 1e-6) continue;
-            if (!exportable || exportable(itemName)) connections.push({ itemName, rate: supply[i], from: producers[i], to: "export" });
-            else surplus?.push({ itemName, rate: supply[i] });
+            if (exportable && !exportable(itemName)) {
+                surplus?.push({ itemName, rate: supply[i] });
+                continue;
+            }
+            const sent = Math.min(supply[i], cap);
+            cap -= sent;
+            if (sent > 1e-6) connections.push({ itemName, rate: sent, from: producers[i], to: "export" });
+            if (supply[i] - sent > 1e-6) connections.push({ itemName, rate: supply[i] - sent, from: producers[i], to: "export", dispose: true });
         }
     }
     return connections;
@@ -645,13 +660,14 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const entryFed = new Set<string>();
 
     const surplusList: { itemName: string; rate: number }[] = [];
-    const connections = assignFlows(ends, options.exportable, surplusList, options.bought);
+    const connections = assignFlows(ends, options.exportable, surplusList, options.bought, options.exportCaps);
 
     // An exit that feeds consumers and also exports its surplus gets a priority splitter:
     // consumers first, only the overflow leaves at the edge (a plain split would halve them)
     for (const exit of ends.filter((e) => e.kind === "out")) {
         const mine = connections.filter((c) => c.from === exit);
-        const overflow = mine.find((c) => c.to === "export");
+        // The overflow is what goes to a sink when there is such an export, else the export
+        const overflow = mine.find((c) => c.to === "export" && c.dispose) ?? mine.find((c) => c.to === "export");
         if (!overflow || mine.length < 2 || options.prioritySplitters === false) continue;
         const splitter = prioritySplitter(exit, overflow.itemName);
         if (!splitter) continue;
@@ -661,7 +677,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         // Both bottom cells of the splitter stand on something
         for (const c of [exit.port, add(exit.port, exit.dir)]) all.push(...supportColumn(occupancy, c[0], c[1], c[2], 0, () => makeUid("s")));
         splitter.cells.forEach((c) => reserved.add(keyOf(c)));
-        for (const c of mine) c.from = c.to === "export" ? splitter.overflow : splitter.first;
+        for (const c of mine) c.from = c === overflow ? splitter.overflow : splitter.first;
         reserveEnd(splitter.first);
         reserveEnd(splitter.overflow);
     }
@@ -718,9 +734,11 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         let goal: (cell: Cell, heading: Side) => Goal | null;
         let estimate: (c: Cell) => number;
         if (conn.to === "export") {
-            const exportTrees = [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}` && !n.lift && n.items.size === 1);
+            // Leftovers for a sink gather on their own belt, everything else on the export belt
+            const treeName = `${conn.dispose ? "dispose" : "export"}:${conn.itemName}`;
+            const exportTrees = [...nodes.values()].filter((n) => n.tree === treeName && !n.lift && n.items.size === 1);
             // Leftovers for a sink may leave through the sides too; everything else front or back
-            const sides = options.sideExit?.(conn.itemName) ?? false;
+            const sides = conn.dispose || (options.sideExit?.(conn.itemName) ?? false);
             estimate = (c) => (sides ? Math.min(c[0] - minX, maxX - c[0], maxY - c[1]) : maxY - c[1]) + c[2];
             // One belt out per item: join the item's export belt while it has room, a new exit only otherwise
             const joinable = exportTrees.some((n) => (treeTotals.get(n.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6);
@@ -741,7 +759,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                 }
                 return null;
             };
-            tree = `export:${conn.itemName}`;
+            tree = treeName;
         } else {
             const to = conn.to;
             estimate = (c) => Math.abs(to.port[0] - c[0]) + Math.abs(to.port[1] - c[1]) + Math.abs(to.port[2] - c[2]);
@@ -789,7 +807,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
                 if (found.goal.kind === "entry") entryFed.add(found.goal.end.uid);
                 if (tree) treeTotals.set(tree, (treeTotals.get(tree) ?? 0) + conn.rate);
                 if (startNode.start?.edge) io.push({ kind: "import", itemName: conn.itemName, cell: startNode.cell, rate: conn.rate });
-                if (found.goal.kind === "edge") io.push({ kind: "export", itemName: conn.itemName, cell: found.end.cell, rate: conn.rate });
+                if (found.goal.kind === "edge") io.push({ kind: "export", itemName: conn.itemName, cell: found.end.cell, rate: conn.rate, ...(conn.dispose && { dispose: true }) });
                 else if (found.goal.kind === "merge" && conn.to === "export") {
                     const point = io.find((p) => p.kind === "export" && p.itemName === conn.itemName);
                     if (point) point.rate += conn.rate;

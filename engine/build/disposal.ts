@@ -95,7 +95,7 @@ export function attachDisposal(
     const all = [...placements];
     const occ = occupancyOf(all);
     const result = io.map((point): IoPoint => {
-        if (point.kind !== "export" || keepExporting(point.itemName) || point.cell[2] !== 0) return point;
+        if (point.kind !== "export" || (!point.dispose && keepExporting(point.itemName)) || point.cell[2] !== 0) return point;
         const side = exitSide(all, occ, point.cell);
         if (!side) return point;
         const [dx, dy] = SIDE_OFFSET[side];
