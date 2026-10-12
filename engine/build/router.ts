@@ -761,7 +761,10 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             ? [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}`).map((n) => n.cell[2])
             : [conn.to.port[2], ...[...nodes.values()].filter((n) => conn.to !== "export" && n.sinks.has(conn.to.uid)).map((n) => n.cell[2])];
         const levels = [...new Set([0, 1, ...starts.map((st) => st.cell[2]), ...goalZs])].filter((z) => liftLevels.includes(z) || z <= 1).sort((a, b) => a - b);
-        let found = search(starts, goal, estimate, levels);
+        const single = conn.from === "import" && (options.singleImport?.(conn.itemName) ?? false);
+        // A single input (coins): branch off the one belt first, a new input only if that fails
+        let found = search(single ? starts.filter((st) => !st.edge || !st.extra) : starts, goal, estimate, levels);
+        if (!found && single) found = search(starts.map((st) => (st.edge ? { ...st, extra: 0 } : st)), goal, estimate, levels);
         // Couldn't reach the item's export belt: a second exit after all
         if (!found && conn.to === "export" && !allowNewExit) {
             allowNewExit = true;

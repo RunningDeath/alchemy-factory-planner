@@ -83,7 +83,9 @@ const flows = (list: NodeBeltInfo["perMachineInputs"], fluid: boolean, load = 1)
 function loadOf(info: NodeBeltInfo): number {
     const full = (info.perMachineOutputs.find((f) => f.itemName === info.itemName) ?? info.perMachineOutputs[0])?.perMachineRate ?? 0;
     const capacity = full * machinesFor(info);
-    return capacity > 0 ? Math.min(1, info.realizedRate / capacity) : 1;
+    // Output nobody takes backs up and the machine waits (a nursery stops eating fertilizer)
+    const taken = Math.max(0, info.realizedRate - info.leftoverRate);
+    return capacity > 0 ? Math.min(1, taken / capacity) : 1;
 }
 
 /** `fuel`: the plan's selected fuel, for heated steps that also use it as an ingredient */

@@ -171,7 +171,8 @@ export function BuildPlanner() {
         // Fertilizer and fuel the factory buys reach their machines from outside.
         // Module groups only count while "Build as modules" is on
         const config = factory?.config;
-        const boughtItems = [config && !config.selfFertilizer ? config.selectedFertilizer : undefined, config && !config.selfFuel ? config.selectedFuel : undefined].filter((i): i is string => !!i);
+        // (unset means made in the factory, as in the planner)
+        const boughtItems = [config?.selfFertilizer === false ? config.selectedFertilizer : undefined, config?.selfFuel === false ? config.selectedFuel : undefined].filter((i): i is string => !!i);
         const request: GenerateRequest = {
             steps,
             options: { ...opts, moduleGroups: opts.modules ? opts.moduleGroups : undefined, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks, boughtItems },

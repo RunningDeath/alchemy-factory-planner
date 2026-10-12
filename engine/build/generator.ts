@@ -1451,6 +1451,7 @@ const MODULE_GAP = 2;
 const MODULE_MAX_WIDTH = 16;
 const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
     { mode: "column", perBelt: 1 },
+    { mode: "column", perBelt: 2 },
     { mode: "row", perBelt: 1 },
     { mode: "near", corridor: 2 },
     { mode: "flow", corridor: 2 },
@@ -1501,7 +1502,9 @@ function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: M
         // Long enough: settle for the best so far (belting many modules together is slow when it fails)
         if (best && Date.now() - started > TIME_BUDGET_MS) break;
         const onProgress = options.onProgress && report(groups.length + a, `Belting ${subs.length} modules together (layout ${a + 1} of up to ${MODULE_ARRANGEMENTS.length})`);
-        const positions = arrangeModules(boxes, orderedFeeds, arrangement, options.maxWidth);
+        // Belts from outside (raw materials, coins) into each module
+        const outside = ordered.map((sub, j) => sub.io.filter((p) => p.kind === "import" && !orderedFeeds.some((row, i) => i !== j && row[j] > 0 && madeIn[order[i]].has(p.itemName))).length);
+        const positions = arrangeModules(boxes, orderedFeeds, arrangement, options.maxWidth, outside);
         const result = joinModules(ordered, names, positions, { ...options, onProgress }, can, leftovers);
         if (!best || failed(result) < failed(best) || (failed(result) === failed(best) && result.size[0] * result.size[1] < best.size[0] * best.size[1])) best = result;
         if (failed(best) === 0) break;
@@ -1514,7 +1517,7 @@ function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: M
 type Box = ReturnType<typeof cellBounds>;
 
 /** Where each module's front left corner goes */
-function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArrangement, maxWidth: number): { x: number; y: number }[] {
+function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArrangement, maxWidth: number, outside: number[] = []): { x: number; y: number }[] {
     const sizes = boxes.map((b) => ({ width: b.maxX - b.minX + 1, depth: b.maxY - b.minY + 1 }));
     if (arrangement.mode === "column") {
         // Suppliers first, so belts run from one module's back into the next one's front
@@ -1526,13 +1529,24 @@ function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArra
             sequence.push(next);
             placed.add(next);
         }
+        // Belts that skip a module pass it on the left: keep a free lane there for each
+        const at = new Map(sequence.map((j, pos) => [j, pos]));
+        let bypass = 0;
+        feeds.forEach((row, i) => row.forEach((n, j) => {
+            if (n > 0 && at.get(j)! > at.get(i)! + 1) bypass += n;
+        }));
+        // So do belts from the front of the line to every module but the first
+        sequence.forEach((j, pos) => {
+            if (pos > 0) bypass += outside[j] ?? 0;
+        });
+        const side = bypass * arrangement.perBelt + (bypass > 0 ? 1 : 0);
         // Centred on one line; belts into a module spread out in the rows in front of it
         const widest = Math.max(...sizes.map((s) => s.width));
         const positions = new Array<{ x: number; y: number }>(sizes.length);
         let y = 0;
         sequence.forEach((j, pos) => {
             if (pos > 0) y += MODULE_GAP + feeds.reduce((sum, row) => sum + row[j], 0) * arrangement.perBelt;
-            positions[j] = { x: Math.floor((widest - sizes[j].width) / 2), y };
+            positions[j] = { x: side + Math.floor((widest - sizes[j].width) / 2), y };
             y += sizes[j].depth;
         });
         return positions;
