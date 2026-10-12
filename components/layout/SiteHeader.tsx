@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Sparkles, Calculator, Package, Cog, BookOpen } from "lucide-react";
+import { ChevronDown, Sparkles, Calculator, Package, Cog, BookOpen, FlaskConical, Atom } from "lucide-react";
 import { AlchemyIcon } from "@/components/icons/AlchemyIcon";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { cn } from "@/lib/utils";
 
 const codexLinks = [
   { href: "/items", label: "Items", icon: Package },
-  { href: "/devices", label: "Devices", icon: Cog, comingSoon: true },
+  { href: "/devices", label: "Devices", icon: Cog },
+  { href: "/cauldron", label: "Cauldron", icon: FlaskConical },
+  { href: "/advanced-cauldron", label: "Advanced Cauldron", icon: FlaskConical },
+  { href: "/paradox-crucible", label: "Paradox Crucible", icon: Atom },
   { href: "/recipes", label: "Recipes", icon: BookOpen, comingSoon: true },
 ];
 
@@ -23,10 +26,7 @@ export function SiteHeader() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isCalculator = pathname === "/";
-  const isCodexActive =
-    pathname.startsWith("/items") ||
-    pathname.startsWith("/devices") ||
-    pathname.startsWith("/recipes");
+  const isCodexActive = codexLinks.some((link) => pathname.startsWith(link.href));
 
   // Close dropdown when clicking outside
   useEffect(() => {

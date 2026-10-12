@@ -313,6 +313,13 @@ export function advancedCauldronRecipesFor(options: CauldronOptions): CauldronRe
     return result;
 }
 
+/** Every mix of either cauldron as a recipe, by what it makes (for the codex) */
+export function cauldronMixesByOutput(kind: "basic" | "advanced"): Map<string, CauldronRecipe[]> {
+    const source = kind === "basic" ? (mixes ??= allMixes()) : (advancedMixes ??= allAdvancedMixes());
+    const machine = kind === "basic" ? "cauldron" : "advanced-cauldron";
+    return new Map([...source].map(([out, variants]) => [out, variants.map((v) => toRecipe(out, v, machine))]));
+}
+
 let everything: Map<string, CauldronRecipe> | null = null;
 /** Any cauldron recipe (either cauldron) the planner may have used, by id */
 export function cauldronRecipeById(id: string): CauldronRecipe | undefined {
