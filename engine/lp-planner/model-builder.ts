@@ -5,14 +5,16 @@ import { Device, Item, PlannerConfig, Recipe } from "../types";
 import { EfficiencyContext, EPSILON } from "./types";
 import { isAlchemyMachine } from "./efficiency";
 import { normalizeItemId, getItem as getItemById, getAllItems, getEffectiveRecipeTime } from "../item-utils";
-import { cauldronRecipeById, cauldronRecipesFor } from "../cauldron";
+import { cauldronRecipeById, cauldronRecipesFor, PLANT_BASED } from "../cauldron";
 
-/** What nurseries grow: cauldron inputs that need nothing but a nursery */
-const PLANTS = new Set((recipesData as unknown as Recipe[]).filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? "")));
+/** Plant-based cauldron inputs: grown, or made from one plant alone */
+const PLANTS = PLANT_BASED;
 /** Extra weight per cauldron input slot that isn't a plant, in cauldrons (machines) */
 const NON_PLANT_SLOT_COST = 4;
 /** Extra weight per cauldron slot taking an item another slot takes too */
 const SHARED_SLOT_COST = 4;
+/** Extra weight of a heated machine: its stove or heating pad, in machines */
+const HEATED_COST = 1;
 
 // Pre-index data
 const itemsMap = new Map<string, Item>();
@@ -254,7 +256,9 @@ export function buildLPModel(
       const heavySlots = cauldron ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
       // An item in two slots: the first fills up completely before the second gets any (a slow start)
       const sharedSlots = cauldron ? 3 - recipe.inputs.length : 0;
-      machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heavySlots * NON_PLANT_SLOT_COST + sharedSlots * SHARED_SLOT_COST));
+      // A heated machine (crucible, kiln) needs a stove or heating pad under it too
+      const heated = !!device?.heat_consuming_speed && device.category !== "heating" ? HEATED_COST : 0;
+      machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heated + heavySlots * NON_PLANT_SLOT_COST + sharedSlots * SHARED_SLOT_COST));
     }
   });
 

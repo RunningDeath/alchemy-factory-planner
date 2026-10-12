@@ -17,11 +17,17 @@ function boxRotation(inSide: Side): Rotation {
     return order.indexOf(inSide) as Rotation;
 }
 
-/** A box laid back into the two straight belt pieces it stands in for */
+/**
+ * A box laid back into the two straight belt pieces it stands in for, in lab stands: the box
+ * carried what stood on it, a belt doesn't (stands nothing rests on go when supports are tidied)
+ */
 function boxToBelts(box: Placement, fertilizer: string): Placement[] {
     const inSide = rotateSide("left", box.rot);
     const piece = beltPieceFor([inSide], [oppositeSide(inSide)])!;
-    return placementCells(box).map((c, k) => ({ uid: `${box.uid}:b${k}`, id: piece.id, x: c.x, y: c.y, z: c.z, rot: piece.rot, lane: "route" as const, label: fertilizer }));
+    return placementCells(box).flatMap((c, k): Placement[] => [
+        { uid: `${box.uid}:b${k}`, id: piece.id, x: c.x, y: c.y, z: c.z, rot: piece.rot, lane: "route", label: fertilizer },
+        { uid: `${box.uid}:s${k}`, id: "frame-single", x: c.x, y: c.y, z: c.z, rot: 0 },
+    ]);
 }
 
 /**

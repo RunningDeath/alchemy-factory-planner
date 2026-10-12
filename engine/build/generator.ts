@@ -29,7 +29,7 @@ import { attachDisposal, type Disposal } from "./disposal";
 import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { removeStraightLines } from "./compact";
 import { expandPairs, pairSteps, pairTiers } from "./pairs";
-import { PIPE_ID, pipeRisers } from "./pipes";
+import { layPipes, PIPE_ID, reservePipeCells } from "./pipes";
 import { placeStarterBox, STARTER_BOX_ID } from "./starter";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
@@ -112,6 +112,8 @@ export interface ModuleOptions {
 
 /** One storey: walls and pillars are 16 cells high */
 export const STOREY_HEIGHT = 16;
+/** Cells under the ceiling a module can't use (checked in game: a 16-high module stuck out by one) */
+const CEILING_CELLS = 1;
 
 /** More machines than this is not one module (it would take minutes and fill a map) */
 export const MAX_MODULE_MACHINES = 2000;
@@ -197,6 +199,8 @@ const PIPE_UP_COST = 4;
 const PEER_FLOOR_SLACK = 1.1;
 /** After this long, stop trying more layouts once one routes everything */
 const TIME_BUDGET_MS = 60000;
+/** Past this many budgets the best layout so far is taken, belts routed or not */
+const HARD_LIMIT_FACTOR = 1;
 
 /** Free cells around each block, so belts can run between blocks; wider when routing fails */
 const CORRIDORS = [1, 2, 3];
@@ -997,8 +1001,12 @@ function laneInfo(kind: "in" | "out", x: number, level: number, z: number, flows
     return { kind, x, level, z, items, rate, overBelt: rate > beltSpeed + 1e-6 };
 }
 
-/** Cauldron columns: a cauldron and its in-stub, out-stub and a free column for lifts */
-const CAULDRON_PITCH = 5;
+/**
+ * Cauldron columns: left in-stub, cauldron, out-stub and two free columns, one for the lifts
+ * down from the outputs, one for the next column's lifts up to its left inputs (with one,
+ * an output ran straight into the neighbour's input or the lifts got in each other's way)
+ */
+const CAULDRON_PITCH = 7;
 
 /**
  * Cauldrons, laid out like players build them: a row of columns, each on its own
@@ -1135,7 +1143,9 @@ function withUnlockedHeating(step: ModuleStep, can: Capabilities): ModuleStep {
 }
 
 /** Lay every step out as blocks and pack them tightly on the ground (or as modules side by side, see moduleGroups) */
-export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
+export function generateModule(allSteps: ModuleStep[], given: ModuleOptions): GeneratedModule {
+    // The top cell of a storey is taken by the ceiling in game: buildings and pipes stay below it
+    const options = { ...given, maxHeight: given.maxHeight - CEILING_CELLS };
     const groups = moduleGroupsOf(allSteps, options.moduleGroups);
     if (!groups) return generateBlocks(allSteps, options, TIME_BUDGET_MS, true);
     if (groups.length === 1) return generateBlocks(groups[0].steps, { ...options, stackBlocks: groups[0].tower || options.stackBlocks }, TIME_BUDGET_MS, true);
@@ -1150,8 +1160,17 @@ function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs
     let best: GeneratedModule | null = null;
     // One module of several: they line up front to back, so its depth counts most
     const score = (m: GeneratedModule) => m.routes.filter((r) => !r.ok).length * 100000 + (finish ? m.size[0] * m.size[1] : m.size[1] * 100 + m.size[0]);
-    LEVEL_LANE_FLOORS.forEach((levelLaneFloor, k) => {
-        const n = LEVEL_LANE_FLOORS.length;
+    // Only the variants whose block shapes differ: the same blocks lay out the same
+    const shapes = (levelLaneFloor: number) => buildBlocks(allSteps, { ...options, levelLaneFloor }).blocks.map((b) => `${b.info.width}x${b.info.depth}x${b.info.height}`).join("|");
+    const seen = new Set<string>();
+    const variants = LEVEL_LANE_FLOORS.filter((floor) => {
+        const key = shapes(floor);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    variants.forEach((levelLaneFloor, k) => {
+        const n = variants.length;
         const onProgress = options.onProgress && ((f: number, label: string) => options.onProgress!((k + f) / n, label));
         const result = generateBlocksWith(allSteps, { ...options, levelLaneFloor, onProgress }, budgetMs / n, finish);
         if (!best || score(result) < score(best)) best = result;
@@ -1160,7 +1179,8 @@ function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs
     return best!;
 }
 
-function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budgetMs: number, finish: boolean): GeneratedModule {
+/** The module's blocks, one or more per step (after portals, starter box marks and machine pairs) */
+function buildBlocks(allSteps: ModuleStep[], options: ModuleOptions) {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
     const can = capabilities(options.unlocks);
     const made = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
@@ -1216,6 +1236,11 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
             blocks.push(block);
         }
     }
+    return { blocks, steps, can };
+}
+
+function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budgetMs: number, finish: boolean): GeneratedModule {
+    const { blocks, steps, can } = buildBlocks(allSteps, options);
 
     // Production stage of each step: how many steps lie between it and the module's inputs
     const stepByNode = new Map(steps.map((st) => [st.nodeKey, st]));
@@ -1307,6 +1332,8 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
         for (const [corridor, mode] of stacked ? towerAttempts : attempts) {
             // Long enough: settle for the best layout that routes everything
             if (best?.routes.every((r) => r.ok) && Date.now() - started > budgetMs) break;
+            // Even when no layout routes everything yet: settle for the best one after a while
+            if (best && Date.now() - started > budgetMs * HARD_LIMIT_FACTOR) break;
             const label = `Layout ${attempt + 1} of up to ${total}${stacked ? " (stacked)" : ""}: routing belts`;
             const base = attempt++;
             const onProgress = options.onProgress && ((f: number) => options.onProgress!(Math.min(0.99, (base + f) / total), label));
@@ -1320,7 +1347,7 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
             // All layouts of a corridor width get a chance before settling
             if (mode === "packed" && best.routes.every((r) => r.ok)) break;
         }
-        if (best?.routes.every((r) => r.ok) || !stacked) break;
+        if (best?.routes.every((r) => r.ok) || !stacked || Date.now() - started > budgetMs * HARD_LIMIT_FACTOR) break;
         const inTower = sameTowerFailures(bestOfSet!, set);
         const failing =
             inTower.size > 0
@@ -1521,10 +1548,10 @@ function routeAndFinish(
     const products = new Set(tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
     const coins = new Set(tiers.filter((t) => t.deviceId === PURCHASING_PORTAL).flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
 
-    // Pipes straight up from every pipe port first: the cell at each port stays free of belts.
-    // Laid anew when modules are joined, so one fluid's network spans all of them
+    // The cell at each pipe port stays free of belts; the pipes come once the belts are in.
+    // Reserved anew when modules are joined, so one fluid's network spans all of them
     const withoutPipes = blockPlacements.filter((p) => p.id !== PIPE_ID);
-    blockPlacements = [...withoutPipes, ...pipeRisers(withoutPipes, options.maxHeight, () => nextUid("pp")).pipes];
+    blockPlacements = [...withoutPipes, ...reservePipeCells(withoutPipes, () => nextUid("pp"))];
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
         ? routeModule(blockPlacements, {
@@ -1561,7 +1588,8 @@ function routeAndFinish(
         for (const item of fertilizers) if (made.has(item) && !(options.boughtItems ?? []).includes(item)) routed.placements = placeStarterBox(routed.placements, item, options.maxHeight, () => nextUid("sb"));
         // Rows and columns that only pass belts straight through go before the supports get cheaper
         const compact = removeStraightLines({ placements: routed.placements, io: routed.io, tiers });
-        routed.placements = finishSupports(compact.placements, can);
+        // Pipe networks through what the belts left free
+        routed.placements = layPipes(finishSupports(compact.placements, can), options.maxHeight, () => nextUid("pp"));
         routed.io = compact.io;
         tiers = compact.tiers;
     }

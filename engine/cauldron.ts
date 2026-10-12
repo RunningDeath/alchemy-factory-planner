@@ -193,8 +193,13 @@ function toRecipe(out: string, v: Variant): CauldronRecipe {
     };
 }
 
-/** What nurseries grow */
-const PLANTS = new Set(baseRecipes.filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? o.name)));
+/** What nurseries grow, and what is made from one of those alone (sage powder, flax fiber): light and quick to make */
+export const PLANT_BASED: Set<string> = (() => {
+    const grown = new Set(baseRecipes.filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? o.name)));
+    const fromOne = baseRecipes.filter((r) => r.crafted_in !== "cauldron" && r.inputs.length === 1 && grown.has(r.inputs[0].id ?? r.inputs[0].name)).flatMap((r) => r.outputs.map((o) => o.id ?? o.name));
+    return new Set([...grown, ...fromOne]);
+})();
+const PLANTS = PLANT_BASED;
 
 /** Variants offered per material: the simplest few, the cheapest few and a few with three different inputs; the planner picks */
 const PER_KIND = 4;
@@ -211,11 +216,15 @@ export function cauldronRecipesFor(options: CauldronOptions): CauldronRecipe[] {
     for (const [out, variants] of mixes) {
         const usual = productionSteps(out);
         const allowed = variants.filter((v) => v.steps < usual && (options.buyInputs || !v.bought));
+        // Three different plant-based inputs always count (the step count adds sage twice for
+        // sage + sage powder, though one nursery feeds both)
+        const plantMixes = variants.filter((v) => v.distinct === 3 && v.picks.every((p) => PLANTS.has(p.id)) && (options.buyInputs || !v.bought));
+        // Only where the cauldron beats the usual route at all (salt stays rock salt in a crusher)
         if (allowed.length === 0) continue;
         // Also three different inputs, plants first: a slot with an item twice waits for the first
         // one to fill up before the second gets any, which delays the start
         const plantShare = (v: Variant) => v.picks.filter((p) => PLANTS.has(p.id)).length;
-        const threeKinds = allowed.filter((v) => v.distinct === 3).sort((a, b) => plantShare(b) - plantShare(a) || bySimplicity(a, b));
+        const threeKinds = [...new Set([...plantMixes, ...allowed.filter((v) => v.distinct === 3)])].sort((a, b) => plantShare(b) - plantShare(a) || bySimplicity(a, b));
         const picked = new Set([...[...allowed].sort(bySimplicity).slice(0, PER_KIND), ...[...allowed].sort(byPrice).slice(0, PER_KIND), ...threeKinds.slice(0, PER_KIND)]);
         picked.forEach((v) => result.push(toRecipe(out, v)));
     }

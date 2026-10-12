@@ -108,6 +108,8 @@ const MACHINE_CATEGORIES = new Set(["production", "portal", "storage"]);
  * lab stands, beams, wood blocks and the stove, never on other machines.
  */
 export function canSupport(supporter: BuildingFootprint, carried?: BuildingFootprint): boolean {
+    // Pipes hang freely and carry nothing
+    if (supporter.category === "pipe") return false;
     if (carried && carried.id === supporter.id && STACKS_ON_ITSELF.has(supporter.id)) return true;
     return !MACHINE_CATEGORIES.has(supporter.category) || isDirectlyStackable(supporter);
 }

@@ -1,9 +1,10 @@
 /**
- * Pipes: every pipe port of a module (extractors, blenders, the first steam heater of a
- * row) gets a pipe straight up to the top layer, where the ports of one fluid join into one
- * network. Brine from the extractors reaches the blender that way; a fluid nobody in the
- * module makes (steam) comes in through its network at the top: one connection per fluid.
- * Laid before the belts are routed, so the cell at each pipe port stays free.
+ * Pipes: the cell at every pipe port of a module (extractors, blenders, the first steam
+ * heater of a row) is reserved before the belts are routed. Once the belts are in, the ports
+ * of one fluid join into one network through the free cells, as low as they can (pipes need
+ * no support). Brine from the extractors reaches the blender that way; a fluid nobody in the
+ * module makes (steam, bought brine) gets one pipe from the middle of its network straight
+ * up to the module's top, where the player connects it.
  */
 import { getFootprint, oppositeSide, SIDE_OFFSET } from "./footprint";
 import { buildOccupancy, placementPorts, type Placement } from "./layout";
@@ -24,91 +25,166 @@ interface PipePort {
     z: number;
     /** Side of the start cell that faces the port */
     toward: Side | VerticalFace;
+    /** The machine takes the fluid in or gives it out */
+    kind: "in" | "out";
 }
 
 const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
+type Cell = [number, number, number];
+const STEPS: [number, number, number, Side | VerticalFace][] = [
+    [-1, 0, 0, "left"],
+    [1, 0, 0, "right"],
+    [0, -1, 0, "up"],
+    [0, 1, 0, "down"],
+    [0, 0, 1, "top"],
+    [0, 0, -1, "base"],
+];
+const opposite = (side: Side | VerticalFace): Side | VerticalFace => (side === "top" ? "base" : side === "base" ? "top" : oppositeSide(side));
 
-/**
- * The pipe ports that need a pipe, per machine (a steam heater needs one of its two sides,
- * other machines every pipe port), and how many have no free column above them
- */
-function pipePorts(placements: Placement[], columnFree: (x: number, y: number, z: number) => boolean): { ports: PipePort[]; blocked: number } {
+/** The pipe ports needing a pipe: a steam heater needs one of its two sides, other machines every pipe port */
+function pipePorts(placements: Placement[], cellFree: (x: number, y: number, z: number) => boolean): PipePort[] {
     const ports: PipePort[] = [];
-    let blocked = 0;
     for (const p of placements) {
         const fp = getFootprint(p.id);
         if (!fp || (fp.category !== "production" && fp.category !== "heating")) continue;
         const resource = p.pipeEnd?.items[0]?.itemName;
         // Heaters after the first of a row get their steam from the neighbour
         if (!resource) continue;
+        const kind = p.pipeEnd?.kind ?? "in";
         const options: PipePort[] = [];
         for (const q of placementPorts(p).filter((q) => q.medium === "pipe" && q.face !== "base")) {
             if (q.face === "top") {
-                options.push({ resource, x: q.x, y: q.y, z: q.z + 1, toward: "base" });
+                options.push({ resource, kind, x: q.x, y: q.y, z: q.z + 1, toward: "base" });
                 continue;
             }
             const face = q.face as Side;
             const [dx, dy] = SIDE_OFFSET[face];
             if (portTaken(placements, q.x + dx, q.y + dy, q.z, oppositeSide(face))) continue;
-            options.push({ resource, x: q.x + dx, y: q.y + dy, z: q.z, toward: oppositeSide(face) });
+            options.push({ resource, kind, x: q.x + dx, y: q.y + dy, z: q.z, toward: oppositeSide(face) });
         }
-        const usable = options.filter((o) => columnFree(o.x, o.y, o.z));
-        if (options.length && (p.id === "steam-heater" ? usable.length === 0 : usable.length < options.length)) blocked++;
+        const usable = options.filter((o) => cellFree(o.x, o.y, o.z));
         ports.push(...(p.id === "steam-heater" ? usable.slice(0, 1) : usable));
     }
-    return { ports, blocked };
+    return ports;
 }
 
-/** Pipe pieces for the pipe ports in `placements` (see the file comment; `placements` holds no pipes); each carries its fluid as label */
-export function pipeRisers(placements: Placement[], maxHeight: number, makeUid: () => string): { pipes: Placement[]; blocked: number } {
+/** Placeholders on the cells at the pipe ports, so belts leave them free (see layPipes) */
+export function reservePipeCells(placements: Placement[], makeUid: () => string): Placement[] {
+    const occupancy = buildOccupancy(placements);
+    const reserved = new Set<string>();
+    return pipePorts(placements, (x, y, z) => !occupancy.get(key(x, y, z))?.length && !reserved.has(key(x, y, z))).map((port) => {
+        reserved.add(key(port.x, port.y, port.z));
+        return { uid: makeUid(), id: PIPE_ID, x: port.x, y: port.y, z: port.z, rot: 0, pipeSides: [], label: port.resource };
+    });
+}
+
+/**
+ * The pipe networks for a routed layout (its pipe placeholders are replaced): per fluid, the
+ * ports join through free cells, low ones first; see the file comment
+ */
+export function layPipes(input: Placement[], maxHeight: number, makeUid: () => string): Placement[] {
+    const placements = input.filter((p) => p.id !== PIPE_ID);
     const occupancy = buildOccupancy(placements);
     const cells = new Map<string, { resource: string; sides: Set<Side | VerticalFace> }>();
-    const taken = (x: number, y: number, z: number) => !!occupancy.get(key(x, y, z))?.length || cells.has(key(x, y, z));
-    const columnFree = (x: number, y: number, z0: number) => {
-        for (let z = z0; z < maxHeight; z++) if (taken(x, y, z)) return false;
-        return true;
+    const blocked = (x: number, y: number, z: number) => !!occupancy.get(key(x, y, z))?.length;
+    const ports = pipePorts(placements, (x, y, z) => !blocked(x, y, z));
+    const all = [...occupancy.keys()].map((k) => k.split(",").map(Number));
+    const bounds = {
+        minX: Math.min(...all.map((c) => c[0])) - 1,
+        maxX: Math.max(...all.map((c) => c[0])) + 1,
+        minY: Math.min(...all.map((c) => c[1])) - 1,
+        maxY: Math.max(...all.map((c) => c[1])) + 1,
     };
-    const { ports, blocked } = pipePorts(placements, columnFree);
-    // The pipes join level with the module's top, not at the storey's ceiling
-    const highest = Math.max(0, ...[...occupancy.keys()].map((k) => Number(k.split(",")[2])));
-    const top = Math.min(maxHeight - 1, Math.max(highest, ...ports.map((p) => p.z)));
-    const add = (x: number, y: number, z: number, resource: string, side?: Side | VerticalFace) => {
-        const cell = cells.get(key(x, y, z)) ?? { resource, sides: new Set() };
+    // Level with the module's top, not the storey's ceiling
+    const top = Math.min(maxHeight - 1, Math.max(0, ...all.map((c) => c[2]), ...ports.map((p) => p.z)));
+    const add = (c: Cell, resource: string, side?: Side | VerticalFace) => {
+        const k = key(...c);
+        const cell = cells.get(k) ?? { resource, sides: new Set() };
         if (side) cell.sides.add(side);
-        cells.set(key(x, y, z), cell);
+        cells.set(k, cell);
+    };
+    const link = (a: Cell, b: Cell) => {
+        const step = STEPS.find(([dx, dy, dz]) => a[0] + dx === b[0] && a[1] + dy === b[1] && a[2] + dz === b[2])!;
+        cells.get(key(...a))!.sides.add(step[3]);
+        cells.get(key(...b))!.sides.add(opposite(step[3]));
+    };
+    /** Cheapest way from `from` to any cell of `targets`, through free cells; height costs a little */
+    const route = (from: Cell, targets: Set<string>, resource: string): Cell[] | null => {
+        const usable = (x: number, y: number, z: number) => {
+            if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY || z < 0 || z > top) return false;
+            const cell = cells.get(key(x, y, z));
+            return !blocked(x, y, z) && (!cell || cell.resource === resource);
+        };
+        const dist = new Map<string, number>([[key(...from), 0]]);
+        const prev = new Map<string, string>();
+        // Buckets by cost (small integer costs): a simple Dijkstra
+        const buckets: Cell[][] = [[from]];
+        for (let d = 0; d < buckets.length && d < 4000; d++) {
+            for (const c of buckets[d] ?? []) {
+                const k = key(...c);
+                if (dist.get(k) !== d) continue;
+                if (d > 0 && targets.has(k)) {
+                    const path: Cell[] = [];
+                    for (let at: string | undefined = k; at; at = prev.get(at)) path.unshift(at.split(",").map(Number) as Cell);
+                    return path;
+                }
+                for (const [dx, dy, dz] of STEPS) {
+                    const n: Cell = [c[0] + dx, c[1] + dy, c[2] + dz];
+                    const nk = key(...n);
+                    if (!targets.has(nk) && !usable(...n)) continue;
+                    // Up costs more than across: networks stay low
+                    const cost = d + (dz > 0 ? 3 : 1);
+                    if (cost >= (dist.get(nk) ?? Infinity)) continue;
+                    dist.set(nk, cost);
+                    prev.set(nk, k);
+                    (buckets[cost] ??= []).push(n);
+                }
+            }
+        }
+        return null;
     };
 
     const byResource = new Map<string, PipePort[]>();
     for (const port of ports) byResource.set(port.resource, [...(byResource.get(port.resource) ?? []), port]);
     for (const [resource, list] of byResource) {
-        // Straight up from every port
-        const tops: [number, number][] = [];
-        for (const port of list) {
-            if (!columnFree(port.x, port.y, port.z)) continue;
-            add(port.x, port.y, port.z, resource, port.toward);
-            for (let z = port.z; z < top; z++) {
-                add(port.x, port.y, z, resource, "top");
-                add(port.x, port.y, z + 1, resource, "base");
-            }
-            tops.push([port.x, port.y]);
-        }
-        // The tops join along the top layer, each to the nearest part of the network so far
-        const joined = new Set<string>(tops.length ? [`${tops[0][0]},${tops[0][1]}`] : []);
-        for (const [tx, ty] of tops.slice(1)) {
-            if (joined.has(`${tx},${ty}`)) continue;
-            const path = pathOnLayer(tx, ty, joined, (x, y) => {
-                const cell = cells.get(key(x, y, top));
-                return !occupancy.get(key(x, y, top))?.length && (!cell || cell.resource === resource);
-            });
+        for (const port of list) add([port.x, port.y, port.z], resource, port.toward);
+        // Join the ports one by one to the network so far
+        const tree = new Set([key(list[0].x, list[0].y, list[0].z)]);
+        for (const port of list.slice(1)) {
+            if (tree.has(key(port.x, port.y, port.z))) continue;
+            const path = route([port.x, port.y, port.z], tree, resource);
             if (!path) continue;
-            path.forEach(([x, y], i) => {
-                add(x, y, top, resource);
-                joined.add(`${x},${y}`);
-                if (i === 0) return;
-                const [px, py] = path[i - 1];
-                const side = (Object.entries(SIDE_OFFSET) as [Side, [number, number]][]).find(([, [dx, dy]]) => px + dx === x && py + dy === y)![0];
-                cells.get(key(px, py, top))!.sides.add(side);
-                cells.get(key(x, y, top))!.sides.add(oppositeSide(side));
+            path.forEach((c, i) => {
+                add(c, resource);
+                tree.add(key(...c));
+                if (i > 0) link(path[i - 1], c);
+            });
+        }
+        // Fluid from outside: one pipe from the middle of the network up to the top
+        if (list.every((p) => p.kind === "in")) {
+            const net = [...tree].map((k) => k.split(",").map(Number) as Cell);
+            const [cx, cy] = [net.reduce((s, c) => s + c[0], 0) / net.length, net.reduce((s, c) => s + c[1], 0) / net.length];
+            const topCells = new Set<string>();
+            for (let x = bounds.minX; x <= bounds.maxX; x++) for (let y = bounds.minY; y <= bounds.maxY; y++) topCells.add(key(x, y, top));
+            // Nearest the middle first; a straight column if one is free, else the cheapest way up
+            net.sort((p, q) => Math.hypot(p[0] - cx, p[1] - cy) - Math.hypot(q[0] - cx, q[1] - cy));
+            let up: Cell[] | null = null;
+            for (const start of net) {
+                if (start[2] === top) {
+                    up = [start];
+                    break;
+                }
+                const column: Cell[] = [];
+                for (let z = start[2]; z <= top; z++) column.push([start[0], start[1], z]);
+                if (column.slice(1).every((c) => !blocked(...c) && (!cells.get(key(...c)) || cells.get(key(...c))!.resource === resource))) {
+                    up = column;
+                    break;
+                }
+            }
+            up ??= route(net[0], topCells, resource);
+            up?.forEach((c, i) => {
+                add(c, resource);
+                if (i > 0) link(up![i - 1], c);
             });
         }
     }
@@ -116,43 +192,5 @@ export function pipeRisers(placements: Placement[], maxHeight: number, makeUid: 
         const [x, y, z] = k.split(",").map(Number);
         return { uid: makeUid(), id: PIPE_ID, x, y, z, rot: 0, pipeSides: [...cell.sides], label: cell.resource };
     });
-    return { pipes, blocked };
-}
-
-/** Shortest path on one layer from (x, y) to any cell in `targets` ("x,y" keys), through cells `ok` allows */
-function pathOnLayer(x: number, y: number, targets: Set<string>, ok: (x: number, y: number) => boolean): [number, number][] | null {
-    const start = `${x},${y}`;
-    const prev = new Map<string, string | null>([[start, null]]);
-    const queue: [number, number][] = [[x, y]];
-    for (let i = 0; i < queue.length && i < 20000; i++) {
-        const [cx, cy] = queue[i];
-        const here = `${cx},${cy}`;
-        if (i > 0 && targets.has(here)) {
-            const path: [number, number][] = [];
-            for (let k: string | null = here; k; k = prev.get(k) ?? null) path.unshift(k.split(",").map(Number) as [number, number]);
-            return path;
-        }
-        for (const [dx, dy] of Object.values(SIDE_OFFSET)) {
-            const [nx, ny] = [cx + dx, cy + dy];
-            const next = `${nx},${ny}`;
-            if (prev.has(next) || Math.abs(nx - x) > 64 || Math.abs(ny - y) > 160) continue;
-            if (!targets.has(next) && !ok(nx, ny)) continue;
-            prev.set(next, here);
-            queue.push([nx, ny]);
-        }
-    }
-    return null;
-}
-
-/**
- * Pipe ports that can't get their pipe: the column from the port's cell to `maxHeight`
- * isn't free (a steam heater needs one of its two sides). Towers must not add any.
- */
-export function blockedPipePorts(placements: Placement[], maxHeight: number): number {
-    const occupancy = buildOccupancy(placements);
-    const columnFree = (x: number, y: number, z0: number) => {
-        for (let z = z0; z < maxHeight; z++) if (occupancy.get(key(x, y, z))?.some((c) => c.id !== PIPE_ID)) return false;
-        return true;
-    };
-    return pipePorts(placements, columnFree).blocked;
+    return [...placements, ...pipes];
 }
