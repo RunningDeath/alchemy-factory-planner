@@ -22,7 +22,7 @@
  */
 import { beltPieceFor } from "./belt-pieces";
 import { footprintPorts, getFootprint, isDirectlyStackable, oppositeSide, rotatedSize, STACKS_ON_ITSELF, type Rotation } from "./footprint";
-import { buildOccupancy, placementCells, placementPorts, type Placement } from "./layout";
+import { buildOccupancy, cellKey, placementCells, placementPorts, type Placement } from "./layout";
 import { preferBlocks, pruneSupports, supportColumn, beamsUnderRuns } from "./supports";
 import { buildTowers, type Tower } from "./towers";
 import { attachDisposal, type Disposal } from "./disposal";
@@ -87,6 +87,13 @@ export interface ModuleOptions {
     disposal?: Disposal;
     /** Buy purchasable raw materials at purchasing portals inside the module, paid through one coin belt (default: yes, when unlocked) */
     buyRaw?: boolean;
+    /**
+     * Build as modules: each group (step nodeKeys) becomes its own small module, stacked into
+     * towers, with its inputs at its front and outputs at its back. The modules stand side by
+     * side and are belted to each other. Steps in no group form one more module laid out as
+     * usual. Absent or empty: one module for everything
+     */
+    moduleGroups?: string[][];
     /** Progress while laying out and routing: share done (0–1) and what is happening */
     onProgress?: (fraction: number, label: string) => void;
 }
@@ -1039,8 +1046,19 @@ function withUnlockedHeating(step: ModuleStep, can: Capabilities): ModuleStep {
     return { ...step, heating: { kind: "stove", fuelItem, fuelRate } };
 }
 
-/** Lay every step out as blocks and pack them tightly on the ground */
+/** Lay every step out as blocks and pack them tightly on the ground (or as modules side by side, see moduleGroups) */
 export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): GeneratedModule {
+    const groups = moduleGroupsOf(allSteps, options.moduleGroups);
+    if (!groups) return generateBlocks(allSteps, options, TIME_BUDGET_MS, true);
+    if (groups.length === 1) return generateBlocks(groups[0].steps, { ...options, stackBlocks: groups[0].tower || options.stackBlocks }, TIME_BUDGET_MS, true);
+    return generateGrouped(allSteps, groups, options);
+}
+
+/**
+ * `budgetMs`: stop trying more layouts after this long once one routes everything.
+ * `finish`: tidy up the supports (off while it is one module of several: that comes last)
+ */
+function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs: number, finish: boolean): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
     const can = capabilities(options.unlocks);
     const made = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
@@ -1127,9 +1145,7 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
     // tight packing only as a last resort
     // Tight packing too at every width: it leaves the least free floor when its belts fit
     const attempts: [number, LayoutMode][] = CORRIDORS.flatMap((c): [number, LayoutMode][] => [[c, "near"], [c, "flow"], [c, "packed"]]);
-    // Byproducts: second outputs that share a machine's output belt with its product;
-    // left on the belt they would block the machine
-    const leftovers = new Set(steps.flatMap((st) => (st.outputs.length >= 2 ? st.outputs.filter((o) => o.itemName !== st.itemName).map((o) => o.itemName) : [])));
+    const leftovers = leftoversOf(steps);
     const singles: Tower[] = blocks.map((b, index) => ({ members: [{ index, dx: 0, dy: 0, dz: 0 }], placements: b.placements, width: b.info.width, depth: b.info.depth }));
     const related = (a: number, b: number) => flow[a].feeders.includes(b) || flow[b].feeders.includes(a);
     const stackOn = options.stackBlocks !== false && can.lifts;
@@ -1174,12 +1190,12 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
         let bestOfSet: GeneratedModule | null = null;
         for (const [corridor, mode] of stacked ? towerAttempts : attempts) {
             // Long enough: settle for the best layout that routes everything
-            if (best?.routes.every((r) => r.ok) && Date.now() - started > TIME_BUDGET_MS) break;
+            if (best?.routes.every((r) => r.ok) && Date.now() - started > budgetMs) break;
             const label = `Layout ${attempt + 1} of up to ${total}${stacked ? " (stacked)" : ""}: routing belts`;
             const base = attempt++;
             const onProgress = options.onProgress && ((f: number) => options.onProgress!(Math.min(0.99, (base + f) / total), label));
             onProgress?.(0);
-            const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can, leftovers);
+            const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can, leftovers, finish);
             if (!bestOfSet || score(result) < score(bestOfSet)) bestOfSet = result;
             if (!best || score(result) < score(best)) best = result;
             // A belt between two blocks of the same tower fails whatever the layout around it:
@@ -1247,6 +1263,7 @@ function layOut(
     options: ModuleOptions,
     can: Capabilities,
     leftovers: Set<string>,
+    finish: boolean,
 ): GeneratedModule {
     const pad = corridor * 2;
     const sizes = towers.map((t) => ({ width: t.width + pad, depth: t.depth + pad }));
@@ -1302,26 +1319,43 @@ function layOut(
             };
         }
     });
+    return routeAndFinish(blockPlacements, tiers, [], options, can, leftovers, finish, ROUTING_MARGIN);
+}
 
+/**
+ * Belts the blocks to each other, to the imports and to the exports, sends unneeded output
+ * to a sink and (`finish`) puts cheaper supports under raised belts.
+ * `extraNames`: names of lane-end owners past the tiers (whole modules of a grouped layout)
+ */
+function routeAndFinish(
+    blockPlacements: Placement[],
+    tiers: TierInfo[],
+    extraNames: string[],
+    options: ModuleOptions,
+    can: Capabilities,
+    leftovers: Set<string>,
+    finish: boolean,
+    margin: number,
+): GeneratedModule {
     const finals = new Set(options.finalProducts ?? []);
     const chosen = new Set(options.exportItems ?? []);
     // What the module makes and nothing in it uses: always leaves, final products or not
     const consumed = new Set([
-        ...blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))),
+        ...tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))),
         // Fuel burnt under heated machines counts as used too
-        ...blocks.flatMap((b) => (b.info.heating ? [b.info.heating.fuelItem] : [])),
+        ...tiers.flatMap((t) => (t.heating ? [t.heating.fuelItem] : [])),
     ]);
-    const products = new Set(blocks.flatMap((b) => b.info.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
-    const coins = new Set(blocks.filter((b) => b.info.deviceId === PURCHASING_PORTAL).flatMap((b) => b.info.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
+    const products = new Set(tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
+    const coins = new Set(tiers.filter((t) => t.deviceId === PURCHASING_PORTAL).flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
 
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
         ? routeModule(blockPlacements, {
               onProgress: options.onProgress && ((f) => options.onProgress!(f, "")),
               beltSpeed: options.beltSpeed,
-              margin: ROUTING_MARGIN,
+              margin,
               maxHeight: options.maxHeight,
-              blockNames: tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`),
+              blockNames: [...tiers.map((t) => `${t.itemName} (${t.machines}× ${getFootprint(t.deviceId)?.name ?? t.deviceId})`), ...extraNames],
               bridges: options.useBridges && can.bridges,
               lifts: can.lifts,
               prioritySplitters: can.prioritySplitters,
@@ -1334,24 +1368,275 @@ function layOut(
               bought: (item) => (options.boughtItems ?? []).includes(item),
           })
         : { placements: [], routes: [], io: [], surplus: [] };
-    // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
-    // beams instead of pillars under longer raised belt runs
-    // (lab stands a belt passes through stay; without that unlock they show up as locked)
     // Byproducts nobody takes end in a knowledge altar, trash barrel or dispatch portal
     const disposed = attachDisposal(routed.placements, routed.io, (item) => finals.has(item) || products.has(item) || chosen.has(item), disposalFor(options, can), () => nextUid("x"));
     routed.placements = disposed.placements;
     routed.io = disposed.io;
-    const blocked = preferBlocks(pruneSupports(routed.placements));
-    routed.placements = pruneSupports(can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked);
+    if (finish) routed.placements = finishSupports(routed.placements, can);
+    return { placements: routed.placements, tiers, size: moduleSize(routed.placements), routes: routed.routes, io: routed.io, surplus: routed.surplus, locked: [] };
+}
 
-    const cells = routed.placements.map((p) => {
+/**
+ * Cheaper supports now that routing is done: wood blocks where no belt shares the cell,
+ * beams instead of pillars under longer raised belt runs
+ * (lab stands a belt passes through stay; without that unlock they show up as locked)
+ */
+function finishSupports(placements: Placement[], can: Capabilities): Placement[] {
+    const blocked = preferBlocks(pruneSupports(placements));
+    return pruneSupports(can.beams ? beamsUnderRuns(blocked, () => nextUid("bm")) : blocked);
+}
+
+function moduleSize(placements: Placement[]): [number, number, number] {
+    const cells = placements.map((p) => {
         const fp = getFootprint(p.id);
         const size = fp ? rotatedSize(fp, p.rot) : { x: 1, y: 1, z: 1 };
         return [p.x, p.y, p.z, p.x + size.x, p.y + size.y, p.z + size.z];
     });
     const extent = (i: number, pick: (a: number, b: number) => number) => cells.reduce((acc, c) => pick(acc, c[i]), pick === Math.max ? -Infinity : Infinity);
-    const size: [number, number, number] = cells.length
+    return cells.length
         ? [extent(3, Math.max) - extent(0, Math.min), extent(4, Math.max) - extent(1, Math.min), extent(5, Math.max)]
         : [0, 0, 0];
-    return { placements: routed.placements, tiers, size, routes: routed.routes, io: routed.io, surplus: routed.surplus, locked: [] };
+}
+
+/** Byproducts: second outputs that share a machine's output belt with its product; left on the belt they would block the machine */
+function leftoversOf(steps: ModuleStep[]): Set<string> {
+    return new Set(steps.flatMap((st) => (st.outputs.length >= 2 ? st.outputs.filter((o) => o.itemName !== st.itemName).map((o) => o.itemName) : [])));
+}
+
+interface StepGroup {
+    steps: ModuleStep[];
+    /** A module the player chose (stacked into towers); false for the steps in no group */
+    tower: boolean;
+}
+
+/** The module groups that apply to these steps, feeding modules first; null for one module */
+function moduleGroupsOf(steps: ModuleStep[], groups: string[][] | undefined): StepGroup[] | null {
+    if (!groups?.length) return null;
+    const taken = new Set<string>();
+    const result: StepGroup[] = [];
+    for (const keys of groups) {
+        // A step listed in two groups belongs to the first
+        const members = steps.filter((st) => keys.includes(st.nodeKey) && !taken.has(st.nodeKey));
+        members.forEach((st) => taken.add(st.nodeKey));
+        if (members.length) result.push({ steps: members, tower: true });
+    }
+    if (result.length === 0) return null;
+    const rest = steps.filter((st) => !taken.has(st.nodeKey));
+    if (rest.length) result.push({ steps: rest, tower: false });
+    // Steps come in production order: a module goes where its last step (its product) is
+    const order = new Map(steps.map((st, i) => [st.nodeKey, i]));
+    const last = (g: StepGroup) => Math.max(...g.steps.map((st) => order.get(st.nodeKey)!));
+    return result.sort((a, b) => last(a) - last(b));
+}
+
+/**
+ * How the modules are arranged, tried in this order until every belt routes:
+ * - row: side by side, fronts in line, with free cells between two modules (a few, plus
+ *   some per belt coming in from another module);
+ * - near / flow: like blocks in one module (see layOut), each module behind the modules
+ *   feeding it, so their outputs run straight into its inputs, with `corridor` free cells
+ *   around each module.
+ */
+type ModuleArrangement = { mode: "row"; perBelt: number } | { mode: "near" | "flow"; corridor: number };
+const MODULE_GAP = 2;
+const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
+    { mode: "row", perBelt: 1 },
+    { mode: "near", corridor: 2 },
+    { mode: "flow", corridor: 2 },
+    { mode: "near", corridor: 4 },
+    { mode: "flow", corridor: 4 },
+];
+
+/**
+ * Build as modules: every group is laid out and routed on its own (inputs at its front,
+ * outputs at its back), then the modules are set out (see ModuleArrangement) and belted
+ * together.
+ */
+function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: ModuleOptions): GeneratedModule {
+    const can = capabilities(options.unlocks);
+    const stages = groups.length + MODULE_ARRANGEMENTS.length;
+    const report = (done: number, label: string) => (f: number, l: string) => options.onProgress?.((done + f) / stages, l ? `${label}: ${l}` : label);
+    const products = groups.map((g) => (g.tower ? g.steps[g.steps.length - 1].itemName : "other steps"));
+    const started = Date.now();
+    const subs = groups.map((group, k) => {
+        // What other modules use leaves at the back, once this module's own machines took theirs
+        const usedElsewhere = new Set(allSteps.filter((st) => !group.steps.includes(st)).flatMap((st) => [...st.inputs.map((i) => i.itemName), st.heating?.fuelItem ?? ""]));
+        const sent = group.steps.flatMap((st) => st.outputs.map((o) => o.itemName)).filter((item) => usedElsewhere.has(item));
+        const opts: ModuleOptions = {
+            ...options,
+            moduleGroups: undefined,
+            stackBlocks: group.tower || options.stackBlocks,
+            exportItems: [...new Set([...(options.exportItems ?? []), ...sent])],
+            onProgress: options.onProgress && report(k, `Module of ${products[k]}`),
+        };
+        return generateBlocks(group.steps, opts, TIME_BUDGET_MS / stages, false);
+    });
+
+    // Belts between modules: feeds[i][j] belts from module i come in at module j's front
+    const madeIn = groups.map((g) => new Set(g.steps.flatMap((st) => st.outputs.map((o) => o.itemName))));
+    const feeds = subs.map((_, i) => subs.map((sub, j) => (i === j ? 0 : sub.io.filter((p) => p.kind === "import" && madeIn[i].has(p.itemName)).length)));
+    const order = moduleOrder(feeds);
+    const names = order.map((k, pos) => `Module ${pos + 1} (${products[k]})`);
+    const ordered = order.map((k) => subs[k]);
+    const orderedFeeds = order.map((i) => order.map((j) => feeds[i][j]));
+    const boxes = ordered.map((sub) => cellBounds(sub.placements));
+
+    const leftovers = leftoversOf(allSteps);
+    const failed = (m: GeneratedModule) => m.routes.filter((r) => !r.ok).length;
+    let best: GeneratedModule | null = null;
+    for (const [a, arrangement] of MODULE_ARRANGEMENTS.entries()) {
+        // Long enough: settle for the best so far (belting many modules together is slow when it fails)
+        if (best && Date.now() - started > TIME_BUDGET_MS) break;
+        const onProgress = options.onProgress && report(groups.length + a, `Belting ${subs.length} modules together (layout ${a + 1} of up to ${MODULE_ARRANGEMENTS.length})`);
+        const positions = arrangeModules(boxes, orderedFeeds, arrangement, options.maxWidth);
+        const result = joinModules(ordered, names, positions, { ...options, onProgress }, can, leftovers);
+        if (!best || failed(result) < failed(best) || (failed(result) === failed(best) && result.size[0] * result.size[1] < best.size[0] * best.size[1])) best = result;
+        if (failed(best) === 0) break;
+    }
+    best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
+    options.onProgress?.(1, "Done");
+    return best!;
+}
+
+type Box = ReturnType<typeof cellBounds>;
+
+/** Where each module's front left corner goes */
+function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArrangement, maxWidth: number): { x: number; y: number }[] {
+    const sizes = boxes.map((b) => ({ width: b.maxX - b.minX + 1, depth: b.maxY - b.minY + 1 }));
+    if (arrangement.mode === "row") {
+        // Belts into a module come up the gaps beside it: each gap gets those from its side
+        let x = 0;
+        return sizes.map((size, pos) => {
+            if (pos > 0) {
+                const fromLeft = feeds.slice(0, pos).reduce((sum, row) => sum + row[pos], 0);
+                const fromRight = feeds.slice(pos).reduce((sum, row) => sum + row[pos - 1], 0);
+                x += MODULE_GAP + (fromLeft + fromRight) * arrangement.perBelt;
+            }
+            const at = { x, y: 0 };
+            x += size.width;
+            return at;
+        });
+    }
+    const c = arrangement.corridor;
+    const feeders = feeds.map((_, j) => feeds.map((row, i) => (row[j] > 0 ? i : -1)).filter((i) => i >= 0));
+    const stageMemo = new Map<number, number>();
+    const stageOf = (j: number, seen = new Set<number>()): number => {
+        if (stageMemo.has(j)) return stageMemo.get(j)!;
+        if (seen.has(j)) return 0;
+        seen.add(j);
+        const stage = feeders[j].length ? Math.max(...feeders[j].map((i) => stageOf(i, seen))) + 1 : 0;
+        stageMemo.set(j, stage);
+        return stage;
+    };
+    const items = sizes.map((size, j) => ({
+        width: size.width + 2 * c,
+        depth: size.depth + 2 * c,
+        stage: stageOf(j),
+        feeders: feeders[j],
+        feederWeights: feeders[j].map((i) => feeds[i][j]),
+    }));
+    // Room for two modules side by side, or one wide one
+    const width = Math.max(maxWidth, ...items.map((it) => it.width)) * 2;
+    const packed = arrangement.mode === "near" ? nearFeeders(items, width) : flowRows(items, width, 0, 0);
+    return packed.positions.map((p) => ({ x: p.x + c, y: p.y + c }));
+}
+
+/** Most modules for trying every order; past that they stay in production order */
+const MAX_ORDERED_MODULES = 7;
+
+/**
+ * Left-to-right order of the modules that keeps the belts between them short: the fewest
+ * belts times modules passed. Ties keep production order.
+ */
+function moduleOrder(feeds: number[][]): number[] {
+    const n = feeds.length;
+    const identity = feeds.map((_, i) => i);
+    if (n > MAX_ORDERED_MODULES) return identity;
+    const cost = (order: number[]) => {
+        const pos = new Map(order.map((k, p) => [k, p]));
+        let sum = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) sum += feeds[i][j] * Math.abs(pos.get(i)! - pos.get(j)!);
+        return sum;
+    };
+    let best = identity;
+    let bestCost = cost(identity);
+    const permute = (prefix: number[], rest: number[]) => {
+        if (rest.length === 0) {
+            const c = cost(prefix);
+            if (c < bestCost) [best, bestCost] = [prefix, c];
+            return;
+        }
+        rest.forEach((k, i) => permute([...prefix, k], [...rest.slice(0, i), ...rest.slice(i + 1)]));
+    };
+    permute([], identity);
+    return best;
+}
+
+function cellBounds(placements: Placement[]) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of placements)
+        for (const c of placementCells(p)) {
+            minX = Math.min(minX, c.x);
+            minY = Math.min(minY, c.y);
+            maxX = Math.max(maxX, c.x);
+            maxY = Math.max(maxY, c.y);
+        }
+    return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Sets the modules out at `positions` (their front left corners) and belts them together:
+ * each module's imports and exports become lane ends, so the router feeds one module's
+ * outputs into another's inputs, brings raw materials in at the front and sends the
+ * products out at the back.
+ */
+function joinModules(
+    subs: GeneratedModule[],
+    names: string[],
+    positions: { x: number; y: number }[],
+    options: ModuleOptions,
+    can: Capabilities,
+    leftovers: Set<string>,
+): GeneratedModule {
+    const placements: Placement[] = [];
+    const tiers: TierInfo[] = [];
+    const routes: RouteResult[] = [];
+    const io: IoPoint[] = [];
+    const surplus = new Map<string, number>();
+    // Lane ends at a module's edge are owned by the whole module, named after the blocks
+    const moduleBase = subs.reduce((sum, m) => sum + m.tiers.length, 0);
+    const isEdge = (p: IoPoint) => p.kind === "import" || p.kind === "export";
+    subs.forEach((sub, k) => {
+        if (sub.placements.length === 0) return;
+        const b = cellBounds(sub.placements);
+        const dx = positions[k].x - b.minX;
+        const dy = positions[k].y - b.minY;
+        const blockBase = tiers.length;
+        const edges = new Map(sub.io.filter(isEdge).map((p) => [cellKey(p.cell[0], p.cell[1], p.cell[2]), p]));
+        for (const p of sub.placements) {
+            const moved: Placement = { ...p, uid: `g${k}.${p.uid}`, x: p.x + dx, y: p.y + dy };
+            if (p.block !== undefined) moved.block = p.block + blockBase;
+            const edge = p.lane === "route" && p.id.startsWith("belt") ? edges.get(cellKey(p.x, p.y, p.z)) : undefined;
+            if (edge) {
+                moved.laneEnd = { kind: edge.kind === "import" ? "in" : "out", items: [{ itemName: edge.itemName, rate: edge.rate }] };
+                moved.block = moduleBase + k;
+            }
+            placements.push(moved);
+        }
+        sub.tiers.forEach((t, i) => tiers.push({ ...t, index: blockBase + i, x: t.x + dx, y: t.y + dy }));
+        const rename = (end: string) => (end === "module edge (import)" ? `${names[k]} front` : end === "module edge (export)" ? `${names[k]} back` : end);
+        routes.push(...sub.routes.map((r) => ({ ...r, from: rename(r.from), to: rename(r.to), key: r.key && `g${k}.${r.key}` })));
+        // Sinks stay; edge imports and exports are now belted to the other modules
+        io.push(...sub.io.filter((p) => !isEdge(p)).map((p) => ({ ...p, cell: [p.cell[0] + dx, p.cell[1] + dy, p.cell[2]] as [number, number, number] })));
+        sub.surplus.forEach((s) => surplus.set(s.itemName, (surplus.get(s.itemName) ?? 0) + s.rate));
+    });
+
+    const joined = routeAndFinish(placements, tiers, names, options, can, leftovers, true, ROUTING_MARGIN);
+    joined.surplus.forEach((s) => surplus.set(s.itemName, (surplus.get(s.itemName) ?? 0) + s.rate));
+    return {
+        ...joined,
+        routes: [...routes, ...joined.routes],
+        io: [...io, ...joined.io],
+        surplus: [...surplus].map(([itemName, rate]) => ({ itemName, rate })),
+    };
 }
