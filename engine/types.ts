@@ -120,6 +120,8 @@ export interface PlannerConfig {
   selectedFuel?: string;
   selfFuel?: boolean; // If true, fuel is produced internally; if false, treated as external input
   selfFertilizer?: boolean; // If true, fertilizer is produced internally; if false, treated as external input
+  /** Self-made fertilizer planned this share above what the nurseries eat (0.25 = 25 %); unset: none */
+  fertilizerReserve?: number;
   planParallelLines?: boolean; // Plan parallel belt lines for flows over the belt limit (default true)
   machineRounding?: RoundingMode; // Whole machines at full speed: round up/down, or exact fractions (default "up")
   /** Make materials in the cauldron where that takes fewer steps than their usual chain */

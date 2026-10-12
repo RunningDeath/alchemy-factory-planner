@@ -344,7 +344,10 @@ export function analyzeBelts(
     const [source, target] = splitEdgeKey(key);
     return { key, source, target, demand, byproduct: byproductOf(nodes[source], nodes[target]) };
   });
-  const targetList = roots.map((r) => ({ nodeKey: nodeKeyOf(r), itemName: r.itemName, demand: r.netOutputRate ?? r.rate }));
+  // The rate the player asked for: the net output may be more (a fertilizer reserve that
+  // isn't eaten leaves as product too)
+  const asked = (item: string) => config.targets.find((t) => t.item === item)?.rate;
+  const targetList = roots.map((r) => ({ nodeKey: nodeKeyOf(r), itemName: r.itemName, demand: Math.min(r.netOutputRate ?? r.rate, asked(r.itemName) ?? Infinity) }));
   const flow = simulateFlow(
     flowNodes,
     flowEdges,

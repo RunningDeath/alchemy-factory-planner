@@ -199,7 +199,10 @@ export function buildLPModel(
         // Each Flax needs 24 nutrients, so total = outputCount * 24
         // Fertilizer consumption = (outputCount * required_nutrients) / nutrient_value
         const effectiveNutrientValue = fertilizerItem.nutrient_value;
-        const fertilizerPerActivation = (effectiveOutputCount * outputItem.required_nutrients) / effectiveNutrientValue;
+        // Self-made fertilizer gets a reserve: the loop is planned with room to spare, so a slow start
+        // or an uneven split doesn't starve a nursery (what they don't eat leaves as product)
+        const reserve = ctx.selfFertilizer ? 1 + ctx.fertilizerReserve : 1;
+        const fertilizerPerActivation = ((effectiveOutputCount * outputItem.required_nutrients) / effectiveNutrientValue) * reserve;
 
         const current = recipeCoeffs.get(fertilizerId) || 0;
         recipeCoeffs.set(fertilizerId, current - fertilizerPerActivation);

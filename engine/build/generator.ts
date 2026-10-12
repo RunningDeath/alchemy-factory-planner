@@ -1346,6 +1346,18 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
         }
         return out;
     };
+    /** Blocks up in a tower with a belt that failed */
+    const upFailures = (result: GeneratedModule, set: Tower[]) => {
+        const up = new Set(set.flatMap((t) => t.members.filter((m) => m.dz > 0).map((m) => m.index)));
+        const out = new Set<number>();
+        for (const r of result.routes) {
+            if (r.ok) continue;
+            for (const i of [blockIndex.get(r.from), blockIndex.get(r.to)]) if (i !== undefined && up.has(i)) out.add(i);
+        }
+        return out;
+    };
+    // Past this, take the best layout so far even with belts missing
+    const hardLimitMs = budgetMs * HARD_LIMIT_FACTOR;
     const towerAttempts = attempts.filter(([c]) => c <= TOWER_MAX_CORRIDOR);
     const total = (towers.length < singles.length ? towerAttempts.length * (STACK_RETRIES + 1) : 0) + attempts.length;
     const started = Date.now();
@@ -1362,7 +1374,7 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
             // Long enough: settle for the best layout that routes everything
             if (best?.routes.every((r) => r.ok) && Date.now() - started > budgetMs) break;
             // Even when no layout routes everything yet: settle for the best one after a while
-            if (best && Date.now() - started > budgetMs * HARD_LIMIT_FACTOR) break;
+            if (best && Date.now() - started > hardLimitMs) break;
             const label = `Layout ${attempt + 1} of up to ${total}${stacked ? " (stacked)" : ""}: routing belts`;
             const base = attempt++;
             const onProgress = options.onProgress && ((f: number) => options.onProgress!(Math.min(0.99, (base + f) / total), label));
@@ -1373,15 +1385,21 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
             // A belt between two blocks of the same tower fails whatever the layout around it:
             // take those blocks out of the towers right away instead of trying every layout
             if (stacked && retries < STACK_RETRIES && sameTowerFailures(result, set).size > 0) break;
+            // Nor does one to a block up in a tower: take it down right away instead of trying
+            // every corridor with the same towers
+            if (stacked && retries < STACK_RETRIES && upFailures(result, set).size > 0) break;
             // All layouts of a corridor width get a chance before settling
             if (mode === "packed" && best.routes.every((r) => r.ok)) break;
         }
-        if (best?.routes.every((r) => r.ok) || !stacked || Date.now() - started > budgetMs * HARD_LIMIT_FACTOR) break;
+        if (best?.routes.every((r) => r.ok) || !stacked || Date.now() - started > hardLimitMs) break;
         const inTower = sameTowerFailures(bestOfSet!, set);
+        const up = upFailures(bestOfSet!, set);
         const failing =
             inTower.size > 0
                 ? inTower
-                : new Set(bestOfSet!.routes.filter((r) => !r.ok).flatMap((r) => [blockIndex.get(r.from), blockIndex.get(r.to)]).filter((i): i is number => i !== undefined));
+                : up.size > 0
+                  ? up
+                  : new Set(bestOfSet!.routes.filter((r) => !r.ok).flatMap((r) => [blockIndex.get(r.from), blockIndex.get(r.to)]).filter((i): i is number => i !== undefined));
         const fresh = [...failing].filter((i) => excluded.get(i) !== "alone");
         if (retries < STACK_RETRIES && fresh.length > 0) {
             const next = new Map(excluded);

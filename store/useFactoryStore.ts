@@ -82,6 +82,9 @@ function withOverride<T extends string>(map: Record<string, T> | undefined, key:
     return next;
 }
 
+/** Self-made fertilizer planned this share above what the nurseries eat */
+const DEFAULT_FERTILIZER_RESERVE = 0.25;
+
 /** Run the planner and belt analysis for a factory with the global research levels. */
 function computeFactory(factory: FactoryData, research: ResearchState) {
     const calculationConfig: PlannerConfig = {
@@ -93,6 +96,8 @@ function computeFactory(factory: FactoryData, research: ResearchState) {
         selectedFuel: factory.config.selectedFuel,
         selfFuel: factory.config.selfFuel,
         selfFertilizer: factory.config.selfFertilizer,
+        // Room to spare in a self-fertilizing loop, so a slow start doesn't starve a nursery
+        fertilizerReserve: factory.config.fertilizerReserve ?? DEFAULT_FERTILIZER_RESERVE,
     };
 
     // Only the LP planner knows cauldron recipes
