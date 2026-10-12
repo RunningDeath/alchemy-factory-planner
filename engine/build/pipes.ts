@@ -6,8 +6,8 @@
  * module makes (steam, bought brine) gets one pipe from the middle of its network straight
  * up to the module's top, where the player connects it.
  */
-import { getFootprint, oppositeSide, SIDE_OFFSET } from "./footprint";
-import { buildOccupancy, placementPorts, type Placement } from "./layout";
+import { footprintCells, getFootprint, oppositeSide, SIDE_OFFSET } from "./footprint";
+import { buildOccupancy, cellsCollide, placementPorts, type Placement } from "./layout";
 import type { Side, VerticalFace } from "./types";
 
 export const PIPE_ID = "pipe";
@@ -44,6 +44,7 @@ const opposite = (side: Side | VerticalFace): Side | VerticalFace => (side === "
 /** The pipe ports needing a pipe: a steam heater needs one of its two sides, other machines every pipe port */
 function pipePorts(placements: Placement[], cellFree: (x: number, y: number, z: number) => boolean): PipePort[] {
     const ports: PipePort[] = [];
+    const heaters: PipePort[][] = [];
     for (const p of placements) {
         const fp = getFootprint(p.id);
         if (!fp || (fp.category !== "production" && fp.category !== "heating")) continue;
@@ -63,7 +64,15 @@ function pipePorts(placements: Placement[], cellFree: (x: number, y: number, z: 
             options.push({ resource, kind, x: q.x + dx, y: q.y + dy, z: q.z, toward: oppositeSide(face) });
         }
         const usable = options.filter((o) => cellFree(o.x, o.y, o.z));
-        ports.push(...(p.id === "steam-heater" ? usable.slice(0, 1) : usable));
+        if (p.id === "steam-heater") heaters.push(usable);
+        else ports.push(...usable);
+    }
+    // A heater takes the side nearest another port of its fluid: two heaters face each other
+    for (const options of heaters) {
+        const others = [...ports, ...heaters.filter((o) => o !== options).flat()].filter((o) => o.resource === options[0]?.resource);
+        const near = (o: PipePort) => Math.min(Infinity, ...others.map((q) => Math.abs(q.x - o.x) + Math.abs(q.y - o.y) + Math.abs(q.z - o.z)));
+        const best = [...options].sort((a, b) => near(a) - near(b))[0];
+        if (best) ports.push(best);
     }
     return ports;
 }
@@ -72,11 +81,29 @@ function pipePorts(placements: Placement[], cellFree: (x: number, y: number, z: 
 export function reservePipeCells(placements: Placement[], makeUid: () => string): Placement[] {
     const occupancy = buildOccupancy(placements);
     const reserved = new Set<string>();
-    return pipePorts(placements, (x, y, z) => !occupancy.get(key(x, y, z))?.length && !reserved.has(key(x, y, z))).map((port) => {
-        reserved.add(key(port.x, port.y, port.z));
-        return { uid: makeUid(), id: PIPE_ID, x: port.x, y: port.y, z: port.z, rot: 0, pipeSides: [], label: port.resource };
-    });
+    const free = (x: number, y: number, z: number) => !occupancy.get(key(x, y, z))?.length && !reserved.has(key(x, y, z));
+    const ports = pipePorts(placements, free);
+    const out: Placement[] = [];
+    const reserve = (x: number, y: number, z: number, resource: string) => {
+        if (reserved.has(key(x, y, z))) return;
+        reserved.add(key(x, y, z));
+        out.push({ uid: makeUid(), id: PIPE_ID, x, y, z, rot: 0, pipeSides: [], label: resource });
+    };
+    ports.forEach((port) => reserve(port.x, port.y, port.z, port.resource));
+    // Ports of one fluid in a straight free line (heaters side by side): the pipe between them too
+    for (const a of ports)
+        for (const b of ports) {
+            if (a === b || a.resource !== b.resource || a.z !== b.z || (a.x !== b.x && a.y !== b.y)) continue;
+            const cells: [number, number][] = [];
+            const [dx, dy] = [Math.sign(b.x - a.x), Math.sign(b.y - a.y)];
+            for (let x = a.x + dx, y = a.y + dy; x !== b.x || y !== b.y; x += dx, y += dy) cells.push([x, y]);
+            if (cells.length <= MAX_DIRECT_PIPE && cells.every(([x, y]) => free(x, y, a.z) || reserved.has(key(x, y, a.z)))) cells.forEach(([x, y]) => reserve(x, y, a.z, a.resource));
+        }
+    return out;
 }
+
+/** Longest straight pipe kept free between two ports before the belts are routed */
+const MAX_DIRECT_PIPE = 6;
 
 /**
  * The pipe networks for a routed layout (its pipe placeholders are replaced): per fluid, the
@@ -86,7 +113,9 @@ export function layPipes(input: Placement[], maxHeight: number, makeUid: () => s
     const placements = input.filter((p) => p.id !== PIPE_ID);
     const occupancy = buildOccupancy(placements);
     const cells = new Map<string, { resource: string; sides: Set<Side | VerticalFace> }>();
-    const blocked = (x: number, y: number, z: number) => !!occupancy.get(key(x, y, z))?.length;
+    // A pipe shares a cell with what leaves it room (a lab stand), not with a wood block or belt
+    const pipeCell = footprintCells(getFootprint(PIPE_ID)!)[0];
+    const blocked = (x: number, y: number, z: number) => !!occupancy.get(key(x, y, z))?.some((c) => cellsCollide(c, pipeCell));
     const ports = pipePorts(placements, (x, y, z) => !blocked(x, y, z));
     const all = [...occupancy.keys()].map((k) => k.split(",").map(Number));
     const bounds = {
@@ -165,7 +194,7 @@ export function layPipes(input: Placement[], maxHeight: number, makeUid: () => s
             const net = [...tree].map((k) => k.split(",").map(Number) as Cell);
             const [cx, cy] = [net.reduce((s, c) => s + c[0], 0) / net.length, net.reduce((s, c) => s + c[1], 0) / net.length];
             const topCells = new Set<string>();
-            for (let x = bounds.minX; x <= bounds.maxX; x++) for (let y = bounds.minY; y <= bounds.maxY; y++) topCells.add(key(x, y, top));
+            for (let x = bounds.minX; x <= bounds.maxX; x++) for (let y = bounds.minY; y <= bounds.maxY; y++) if (!blocked(x, y, top)) topCells.add(key(x, y, top));
             // Nearest the middle first; a straight column if one is free, else the cheapest way up
             net.sort((p, q) => Math.hypot(p[0] - cx, p[1] - cy) - Math.hypot(q[0] - cx, q[1] - cy));
             let up: Cell[] | null = null;

@@ -35,7 +35,9 @@ describe("block towers", () => {
 
         expect(stacked.routes.every((r) => r.ok)).toBe(true);
         expect(validateLayout(stacked.placements)).toEqual([]);
-        expect(stacked.size[0] * stacked.size[1]).toBeLessThan(flat.size[0] * flat.size[1] * 0.75);
+        // Less floor, though grinder blocks no longer stack on each other (a tower of different
+        // products needs a lift per level, too complex to be worth the floor)
+        expect(stacked.size[0] * stacked.size[1]).toBeLessThan(flat.size[0] * flat.size[1]);
         expect(stacked.size[2]).toBeLessThanOrEqual(16);
         expect(stacked.tiers.some((t) => t.z > 0)).toBe(true);
 

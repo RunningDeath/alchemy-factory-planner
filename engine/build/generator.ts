@@ -33,7 +33,7 @@ import { layPipes, PIPE_ID, reservePipeCells } from "./pipes";
 import { placeStarterBox, STARTER_BOX_ID } from "./starter";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
-import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
+import { capabilities, isUnlocked, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
 import deviceMetadata from "../../data/device-metadata.json";
 import { flowRows, nearFeeders, packBlocks, transformBlock, type PackedItem } from "./packing";
 
@@ -1121,6 +1121,16 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
 }
 
 
+const ENHANCED_GRINDER = "enhanced-grinder";
+/** The enhanced grinder works twice as fast as a grinder */
+const ENHANCED_GRINDER_SPEED = 2;
+
+/** Machines that take a 3×3 floor or more (nurseries, crushers) */
+function bigMachine(deviceId: string): boolean {
+    const fp = getFootprint(deviceId);
+    return !!fp && fp.size.x * fp.size.y >= BIG_MACHINE_FLOOR;
+}
+
 /** Machines with pipe ports (fluids in or out) */
 function hasPipes(deviceId: string): boolean {
     return getFootprint(deviceId)?.ports.some((p) => p.medium === "pipe") ?? false;
@@ -1192,10 +1202,26 @@ function buildBlocks(allSteps: ModuleStep[], options: ModuleOptions) {
     const madeHere = new Set(bought.flatMap((st) => st.outputs.map((o) => o.itemName)));
     const ownFertilizer = new Set(bought.filter((st) => st.deviceId.includes("nursery")).flatMap((st) => st.inputs.map((i) => i.itemName)).filter((item) => madeHere.has(item) && !(options.boughtItems ?? []).includes(item)));
     const marked = bought.map((st) => (st.outputs.length === 1 && ownFertilizer.has(st.outputs[0].itemName) ? { ...st, starterBox: true } : st));
-    const steps = pairSteps(marked, (item) => onBelt.has(item));
+    const paired = pairSteps(marked, (item) => onBelt.has(item));
     // Upper levels are fed by lifts; decks need beams
     const allowed = (stacking: Stacking): Stacking =>
         !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
+    // Grinders: enhanced ones (twice as fast, 3 cells long) where their block takes less floor
+    const floorOf = (st: ModuleStep) => {
+        const fp = getFootprint(st.deviceId)!;
+        const rot = machineRotation(fp);
+        const shape = chooseShape(st, Math.ceil(st.machines - 1e-9), fp, rot, allowed(stackingFor(fp, rot)), options);
+        const perBlock = shape.columns * shape.rows * shape.levels;
+        return shape.width * shape.depth * Math.ceil(Math.ceil(st.machines - 1e-9) / perBlock);
+    };
+    const steps = paired.map((st) => {
+        if (st.deviceId !== "grinder" || st.heating || !isUnlocked(ENHANCED_GRINDER, options.unlocks) || !getFootprint(ENHANCED_GRINDER)) return st;
+        const count = Math.ceil(st.machines - 1e-9);
+        const enhanced = Math.ceil(count / ENHANCED_GRINDER_SPEED);
+        const scale = (list: StepFlow[]) => list.map((fl) => ({ ...fl, perMachineRate: (fl.perMachineRate * count) / enhanced }));
+        const variant: ModuleStep = { ...st, deviceId: ENHANCED_GRINDER, machines: enhanced, inputs: scale(st.inputs), outputs: scale(st.outputs) };
+        return floorOf(variant) < floorOf(st) ? variant : st;
+    });
 
     for (const step of steps) {
         const fp = getFootprint(step.deviceId);
@@ -1299,7 +1325,10 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
                 canCarry: b.info.deviceId !== PURCHASING_PORTAL && !hasPipes(b.info.deviceId) && ex.get(i) !== "alone",
                 upCost: hasPipes(b.info.deviceId) ? PIPE_UP_COST : 0,
                 group: ex.get(i) === "own" ? `own:${b.info.deviceId}` : undefined,
-                kind: b.info.deviceId,
+                // Big machines of one kind rather stack together (nurseries on nurseries); small ones
+                // like grinders don't: blocks of different products in one tower need a lift per level
+                kind: bigMachine(b.info.deviceId) ? b.info.deviceId : undefined,
+                small: !bigMachine(b.info.deviceId) && b.info.deviceId !== PURCHASING_PORTAL,
             })),
             { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
         );
@@ -1588,8 +1617,8 @@ function routeAndFinish(
         for (const item of fertilizers) if (made.has(item) && !(options.boughtItems ?? []).includes(item)) routed.placements = placeStarterBox(routed.placements, item, options.maxHeight, () => nextUid("sb"));
         // Rows and columns that only pass belts straight through go before the supports get cheaper
         const compact = removeStraightLines({ placements: routed.placements, io: routed.io, tiers });
-        // Pipe networks through what the belts left free
-        routed.placements = layPipes(finishSupports(compact.placements, can), options.maxHeight, () => nextUid("pp"));
+        // Pipe networks through what the belts left free, before supports fill any of it
+        routed.placements = finishSupports(layPipes(compact.placements, options.maxHeight, () => nextUid("pp")), can);
         routed.io = compact.io;
         tiers = compact.tiers;
     }

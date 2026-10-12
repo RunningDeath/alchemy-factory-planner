@@ -94,7 +94,7 @@ function joinFootprints(first: BuildingFootprint, second: BuildingFootprint): { 
 
 /**
  * Joins producer and consumer steps into pair steps where the producer's only product goes
- * into one consumer step that takes nothing else, with as many machines on both sides.
+ * into one consumer step that takes nothing else and needs no more machines than the producer.
  * `keepOnBelt`: items that must reach a belt (final products, exports, bought items).
  */
 export function pairSteps(steps: ModuleStep[], keepOnBelt: (item: string) => boolean): ModuleStep[] {
@@ -107,7 +107,11 @@ export function pairSteps(steps: ModuleStep[], keepOnBelt: (item: string) => boo
         const makers = steps.filter((st) => st.outputs.some((o) => o.itemName === item));
         if (takers.length !== 1 || makers.length !== 1) continue;
         const second = takers[0];
-        if (!pairable(second) || second.inputs.length !== 1 || Math.ceil(second.machines) !== Math.ceil(first.machines)) continue;
+        // One consumer per producer: fine as long as the plan doesn't need more consumers than that
+        // (each then takes one producer's output, no more than the planned ones took)
+        if (!pairable(second) || second.inputs.length !== 1 || Math.ceil(second.machines) > Math.ceil(first.machines)) continue;
+        // A consumer with one belt input: a second one would stay open next to its producer
+        if (getFootprint(second.deviceId)!.ports.filter((p) => p.medium === "belt" && p.dir === "in").length !== 1) continue;
         if (!result.includes(first) || !result.includes(second)) continue;
         const joined = joinFootprints(getFootprint(first.deviceId)!, getFootprint(second.deviceId)!);
         if (!joined) continue;
@@ -123,7 +127,8 @@ export function pairSteps(steps: ModuleStep[], keepOnBelt: (item: string) => boo
             deviceId: joined.fp.id,
             machines: Math.ceil(first.machines),
             inputs: first.inputs,
-            outputs: second.outputs,
+            // The same output spread over one consumer per producer
+            outputs: second.outputs.map((o) => ({ ...o, perMachineRate: (o.perMachineRate * Math.ceil(second.machines)) / Math.ceil(first.machines) })),
             fluidInputs: [],
             unsorted: second.unsorted,
         };

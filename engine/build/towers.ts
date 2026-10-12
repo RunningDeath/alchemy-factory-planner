@@ -42,6 +42,8 @@ export interface TowerBlock {
     group?: string;
     /** Machine kind: the same machines rather stack together (nurseries on nurseries) */
     kind?: string;
+    /** Small machines (grinders): blocks of them don't stack on each other, each would need its own lifts */
+    small?: boolean;
 }
 
 interface TowerOptions {
@@ -259,6 +261,7 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
             const tower = towers[t];
             if (!tower || t === i || tower.members.some((m) => blocks[m.index].canCarry === false || blocks[m.index].group !== blocks[i].group)) continue;
             if (sameOnly && !tower.members.every((m) => blocks[m.index].kind === blocks[i].kind)) continue;
+            if (blocks[i].small && tower.members.some((m) => blocks[m.index].small)) continue;
             const key = `${t}|${version[t]}|${i}`;
             if (!memo.has(key)) {
             let towerBest: Candidate | null = null;
