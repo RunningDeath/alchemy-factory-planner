@@ -88,6 +88,8 @@ export interface RouterOptions {
 }
 
 const PRIORITY_SPLITTER = "splitter-vert";
+/** How far from its exit a priority splitter may stand when it doesn't fit right there */
+const SPLITTER_LEAD = 3;
 
 /** Drawbridge conveyor: anchor post (3 high, needs support) and a 3-cell deck that needs none */
 const BRIDGE_ID = "draw-bridge";
@@ -672,22 +674,36 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         }
     }
 
-    /** A priority splitter right at an exit, if it fits: its first output feeds the module, the second the edge */
+    /**
+     * A priority splitter at an exit: its first output feeds the module, the second the edge.
+     * Right at the exit if it fits, else a few cells on, a straight belt leading to it
+     */
     function prioritySplitter(exit: LaneEnd, itemName: string) {
         const dir = exit.dir;
-        const cells: Cell[] = [exit.port, add(exit.port, dir)].flatMap((c) => [c, [c[0], c[1], c[2] + 1] as Cell]);
         // Not in the way of other lane ends: the cells in front of them stay free for their belts
         const own = new Set([keyOf(exit.port), keyOf(approach(exit))]);
         const othersEnds = new Set(ends.filter((e) => e !== exit).flatMap((e) => [keyOf(e.port), keyOf(approach(e))]));
-        const free = cells.every((c) => inBounds(c) && !nodes.has(keyOf(c)) && (own.has(keyOf(c)) || !othersEnds.has(keyOf(c))) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0));
-        if (!free) return null;
-        const xs = cells.map((c) => c[0]);
-        const ys = cells.map((c) => c[1]);
-        // Unrotated: in on the left, both outputs on the right (lower first, upper second)
-        const placement: Placement = { uid: makeUid("p"), id: PRIORITY_SPLITTER, x: Math.min(...xs), y: Math.min(...ys), z: exit.port[2], rot: rotFor("right", dir), label: itemName, lane: "route" };
-        const out = add(add(exit.port, dir), dir);
-        const end = (z: number, suffix: string): LaneEnd => ({ uid: `${placement.uid}:${suffix}`, kind: "out", items: exit.items, port: [out[0], out[1], z], dir, block: exit.block });
-        return { placement, cells, first: end(exit.port[2], "first"), overflow: end(exit.port[2] + 1, "overflow") };
+        const free = (c: Cell) => inBounds(c) && !nodes.has(keyOf(c)) && (own.has(keyOf(c)) || (!reserved.has(keyOf(c)) && !othersEnds.has(keyOf(c)))) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0);
+        for (let lead = 0; lead <= SPLITTER_LEAD; lead++) {
+            const leadCells: Cell[] = [];
+            let start = exit.port;
+            for (let i = 0; i < lead; i++) {
+                leadCells.push(start);
+                start = add(start, dir);
+            }
+            const cells: Cell[] = [start, add(start, dir)].flatMap((c) => [c, [c[0], c[1], c[2] + 1] as Cell]);
+            if (![...leadCells, ...cells].every(free)) continue;
+            const xs = cells.map((c) => c[0]);
+            const ys = cells.map((c) => c[1]);
+            // Unrotated: in on the left, both outputs on the right (lower first, upper second)
+            const placement: Placement = { uid: makeUid("p"), id: PRIORITY_SPLITTER, x: Math.min(...xs), y: Math.min(...ys), z: exit.port[2], rot: rotFor("right", dir), label: itemName, lane: "route" };
+            const piece = beltPieceFor([oppositeSide(dir)], [dir])!;
+            const belts: Placement[] = leadCells.map((c) => ({ uid: makeUid("b"), id: piece.id, x: c[0], y: c[1], z: c[2], rot: piece.rot, label: itemName, lane: "route" }));
+            const out = add(add(start, dir), dir);
+            const end = (z: number, suffix: string): LaneEnd => ({ uid: `${placement.uid}:${suffix}`, kind: "out", items: exit.items, port: [out[0], out[1], z], dir, block: exit.block });
+            return { placement, belts, cells: [...leadCells, ...cells], base: [...leadCells, start, add(start, dir)], first: end(exit.port[2], "first"), overflow: end(exit.port[2] + 1, "overflow") };
+        }
+        return null;
     }
 
     const treeTotals = new Map<string, number>();
@@ -708,11 +724,13 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
         if (!overflow || mine.length < 2 || options.prioritySplitters === false) continue;
         const splitter = prioritySplitter(exit, overflow.itemName);
         if (!splitter) continue;
-        all.push(splitter.placement);
-        byUid.set(splitter.placement.uid, splitter.placement);
-        addToOccupancy(occupancy, splitter.placement);
-        // Both bottom cells of the splitter stand on something
-        for (const c of [exit.port, add(exit.port, exit.dir)]) all.push(...supportColumn(occupancy, c[0], c[1], c[2], 0, () => makeUid("s")));
+        for (const p of [...splitter.belts, splitter.placement]) {
+            all.push(p);
+            byUid.set(p.uid, p);
+            addToOccupancy(occupancy, p);
+        }
+        // The splitter's bottom cells and the belt leading to it stand on something
+        for (const c of splitter.base) all.push(...supportColumn(occupancy, c[0], c[1], c[2], 0, () => makeUid("s")));
         splitter.cells.forEach((c) => reserved.add(keyOf(c)));
         for (const c of mine) c.from = c === overflow ? splitter.overflow : splitter.first;
         reserveEnd(splitter.first);
