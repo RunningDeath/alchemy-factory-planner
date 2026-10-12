@@ -86,6 +86,22 @@ function beltRecord(p: Placement, byCell: Map<string, Placement[]>): Record {
     return { ...plainRecord({ ...p, rot: beltRotationFor(front) }, belt), activeIndex: beltActiveIndex(front, ins, connected) };
 }
 
+/**
+ * A plain pipe: BaseActiveIndex holds its connected sides relative to its front, like a
+ * belt's inputs (front 1, right 2, back 4, left 8), plus 16 down and 32 up. Checked against
+ * the pipes in three player blueprints.
+ */
+function pipeRecord(p: Placement, fp: BuildingFootprint): Record {
+    const front = beltOutput(p.rot);
+    let bits = 0;
+    for (const side of p.pipeSides ?? []) {
+        if (side === "base") bits |= 16;
+        else if (side === "top") bits |= 32;
+        else bits |= beltActiveIndex(front, [side], []);
+    }
+    return { ...plainRecord(p, fp), activeIndex: bits };
+}
+
 /** Converts placements to blueprint buildings; lifts are grouped into one building each */
 function toRecords(placements: Placement[], warnings: string[]): Record[] {
     // Every cell a building takes: a belt feeding a big machine meets it away from its origin
@@ -124,7 +140,7 @@ function toRecords(placements: Placement[], warnings: string[]): Record[] {
             warnings.push(`Conveyor lift piece at ${p.x},${p.y},${p.z} without a bottom piece skipped`);
             continue;
         }
-        records.push(isBeltPiece(p.id) ? beltRecord(p, byCell) : plainRecord(p, fp));
+        records.push(isBeltPiece(p.id) ? beltRecord(p, byCell) : p.id === "pipe" ? pipeRecord(p, fp) : plainRecord(p, fp));
     }
     return records;
 }

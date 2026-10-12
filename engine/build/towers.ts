@@ -7,6 +7,7 @@
 import { cellKey, cellsCollide, placementCells, type Placement } from "./layout";
 import { transformBlock } from "./packing";
 import { findLaneEnds } from "./router";
+import { blockedPipePorts } from "./pipes";
 import { addToOccupancy, isSupported, supportColumn, type Occupancy } from "./supports";
 
 export interface TowerMember {
@@ -264,7 +265,9 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
             let towerBest: Candidate | null = null;
             for (const { upper, turned } of variants) {
             const top = topMap(tower.placements);
-            const blockedBefore = blockedEnds([...tower.placements, ...upper.placements.map((p) => ({ ...p, x: p.x + 10000 }))]);
+            const apart = [...tower.placements, ...upper.placements.map((p) => ({ ...p, x: p.x + 10000 }))];
+            const blockedBefore = blockedEnds(apart);
+            const pipesBefore = blockedPipePorts(apart, opts.maxHeight);
             const related = tower.members.some((m) => opts.related(m.index, i));
             const sameKind = !!blocks[i].kind && tower.members.some((m) => blocks[m.index].kind === blocks[i].kind);
             // Up to a few cells past the edge, so the upper block's lane ends can reach down
@@ -274,7 +277,10 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
                 for (let dy = ys[0]; dy <= ys[1]; dy++) {
                     const fit = mount(tower, top, upper, dx, dy, opts);
                     if (!fit) continue;
-                    if (blockedEnds([...tower.placements, ...fit.moved, ...fit.supports]) > blockedBefore) continue;
+                    const together = [...tower.placements, ...fit.moved, ...fit.supports];
+                    if (blockedEnds(together) > blockedBefore) continue;
+                    // Nor the column above a pipe port: its riser goes straight up
+                    if (blockedPipePorts(together, opts.maxHeight) > pipesBefore) continue;
                     const reach = bounds([...fit.moved, ...fit.supports]);
                     const width = Math.max(tower.width, dx + upper.width, reach.maxX + 1) - Math.min(0, dx, reach.minX);
                     const depth = Math.max(tower.depth, dy + upper.depth, reach.maxY + 1) - Math.min(0, dy, reach.minY);

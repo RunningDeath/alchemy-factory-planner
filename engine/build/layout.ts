@@ -8,7 +8,7 @@
  * - Ports connect when two neighbouring cells face each other with matching directions.
  */
 import { canSupport, footprintCells, footprintPorts, getFootprint, needsHeat, oppositeSide, SIDE_OFFSET, STACKS_ON_ITSELF, type Rotation } from "./footprint";
-import type { FootprintCell, FootprintPort, Side } from "./types";
+import type { FootprintCell, FootprintPort, Side, VerticalFace } from "./types";
 
 export interface Placement {
     uid: string;
@@ -34,6 +34,8 @@ export interface Placement {
     filterItem?: string;
     /** Purchasing portals: the item bought */
     supplyItem?: string;
+    /** Plain pipes: the sides they connect ("top"/"base" for up and down) */
+    pipeSides?: (Side | VerticalFace)[];
 }
 
 export interface WorldCell extends FootprintCell {

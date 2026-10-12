@@ -39,7 +39,11 @@ function removeLines<T extends Compactable>(module: T, axis: "x" | "y"): T {
         });
         const line = (v: number) => lines.get(v) ?? (lines.set(v, { ok: true }), lines.get(v)!);
         let ok = values.length === 1;
-        if (ok && !SUPPORTS.has(p.id)) {
+        if (ok && p.id === "pipe") {
+            // A pipe running straight across the line, like a straight belt
+            const sides = p.pipeSides ?? [];
+            ok = sides.length === 2 && along.every((face) => sides.includes(face as never));
+        } else if (ok && !SUPPORTS.has(p.id)) {
             const fp = getFootprint(p.id);
             const ports = fp ? footprintPorts(fp, p.rot) : [];
             ok = p.id.startsWith("belt-fixed") && ports.length === 2 && ports.every((q) => q.medium === "belt") && along.every((face) => ports.some((q) => q.face === face));

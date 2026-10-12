@@ -29,6 +29,7 @@ import { attachDisposal, type Disposal } from "./disposal";
 import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { removeStraightLines } from "./compact";
 import { expandPairs, pairSteps, pairTiers } from "./pairs";
+import { PIPE_ID, pipeRisers } from "./pipes";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -898,7 +899,11 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
             for (let c = 0; c < cols; c++) {
                 const x = origin.x + c * 3;
                 const y = top + r * 3;
-                if (!underMachine(x, y)) continue;
+                if (!underMachine(x, y)) {
+                    // A gap breaks the chain: the next heater takes the steam again
+                    first = true;
+                    continue;
+                }
                 const heater: Placement = { uid: nextUid("h"), id: STEAM_HEATER_ID, x, y, z: 0, rot: 0 };
                 // The first heater of a row takes the steam; the rest get it through their neighbour
                 if (first) heater.pipeEnd = { kind: "in", items: [{ itemName: heating.fuelItem, rate: heating.fuelRate / rows }] };
@@ -1166,7 +1171,8 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
             continue;
         }
         // Heated machines need their heat source right under them: no stacking (portals stay on the ground too)
-        const stacking: Stacking = step.heating || step.deviceId === PURCHASING_PORTAL ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
+        // Machines with pipes keep the cells above them free for their risers
+        const stacking: Stacking = step.heating || step.deviceId === PURCHASING_PORTAL || hasPipes(step.deviceId) ? { kind: "none", pitch: fp.size.z } : allowed(stackingFor(fp, rot));
         const baseZ = step.heating ? PLATFORM_HEIGHT[step.heating.kind] : 0;
 
         // Split into several blocks when one can't hold all machines
@@ -1241,7 +1247,7 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
                 // Heated blocks need their heater and portals stay in the front row; machines
                 // with pipes (extractors, blenders) rather stay on the floor where pipes are easy
                 canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && ex.get(i) !== "alone",
-                canCarry: b.info.deviceId !== PURCHASING_PORTAL && ex.get(i) !== "alone",
+                canCarry: b.info.deviceId !== PURCHASING_PORTAL && !hasPipes(b.info.deviceId) && ex.get(i) !== "alone",
                 upCost: hasPipes(b.info.deviceId) ? PIPE_UP_COST : 0,
                 group: ex.get(i) === "own" ? `own:${b.info.deviceId}` : undefined,
                 kind: b.info.deviceId,
@@ -1491,6 +1497,10 @@ function routeAndFinish(
     const products = new Set(tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))).filter((i) => !consumed.has(i) && !leftovers.has(i)));
     const coins = new Set(tiers.filter((t) => t.deviceId === PURCHASING_PORTAL).flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
 
+    // Pipes straight up from every pipe port first: the cell at each port stays free of belts.
+    // Laid anew when modules are joined, so one fluid's network spans all of them
+    const withoutPipes = blockPlacements.filter((p) => p.id !== PIPE_ID);
+    blockPlacements = [...withoutPipes, ...pipeRisers(withoutPipes, options.maxHeight, () => nextUid("pp")).pipes];
     // Belt the blocks to each other, to the imports and to the exports
     const routed = blockPlacements.length
         ? routeModule(blockPlacements, {

@@ -115,7 +115,7 @@ export function carriedItem(p: Placement): string | null {
     if (p.supplyItem) return p.supplyItem;
     if (!p.label || p.label.includes(" + ") || p.label.startsWith("filter:")) return null;
     const category = getFootprint(p.id)?.category;
-    if (category === "production" || category === "logistics" || p.lane) return p.label;
+    if (category === "production" || category === "logistics" || category === "pipe" || p.lane) return p.label;
     return null;
 }
 
