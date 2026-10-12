@@ -68,12 +68,17 @@ describe("Refined Sand tiers", () => {
     const steps = stepsFromReport(report).filter((s) => s.deviceId === "refiner");
     const mod = generateModule(steps, { ...DEFAULT_MODULE_OPTIONS, beltSpeed: report.beltSpeed, finalProducts: ["Fully Refined Sand"] });
     const stepOf = (block: string) => steps.find((s) => block.startsWith(`${s.itemName} (`));
+    // A machine pair takes in what its first machine takes
+    const inputsOf = (block: string) => {
+      const tier = mod.tiers.find((t) => block.startsWith(`${t.itemName} (`));
+      return steps.find((s) => s.itemName === (tier?.fedBy?.itemName ?? tier?.itemName))!.inputs;
+    };
 
     const between = mod.routes.filter((r) => stepOf(r.from) && stepOf(r.to));
     expect(between.length).toBeGreaterThan(0);
     between.forEach((r) => {
       expect(stepOf(r.from)!.outputs.map((o) => o.itemName)).toContain(r.itemName);
-      expect(stepOf(r.to)!.inputs.map((i) => i.itemName)).toContain(r.itemName);
+      expect(inputsOf(r.to).map((i) => i.itemName)).toContain(r.itemName);
     });
     expect(mod.routes.every((r) => r.ok)).toBe(true);
     expect(mod.io.filter((p) => p.kind === "import").every((p) => p.itemName === "Sand")).toBe(true);

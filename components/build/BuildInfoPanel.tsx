@@ -101,6 +101,7 @@ export function BuildInfoPanel({ placements, issues, ports, tiers, routes, io, s
                                 <span className="text-[var(--text-muted)]">
                                     · {t.machines}× {buildingName(t.deviceId)} · at {t.x ?? 0},{t.y ?? 0} · {t.width}×{t.depth}×{t.height}
                                     {t.levels > 1 ? ` · ${t.levels} levels ${t.stacking === "beam-deck" ? "on beam decks" : "stacked directly"}` : ""}
+                                    {t.fedBy ? ` · each fed directly by a ${buildingName(t.fedBy.deviceId)} (${t.fedBy.itemName}), no belt between` : ""}
                                 </span>
                             </button>
                             {t.lanes.map((lane, i) => (

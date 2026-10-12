@@ -28,6 +28,7 @@ import { buildTowers, type Tower } from "./towers";
 import { attachDisposal, type Disposal } from "./disposal";
 import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { removeStraightLines } from "./compact";
+import { expandPairs, pairSteps, pairTiers } from "./pairs";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -143,6 +144,8 @@ export interface TierInfo {
     itemName: string;
     deviceId: string;
     machines: number;
+    /** Machine pair: each machine is fed directly by one of these, no belt between them */
+    fedBy?: { itemName: string; deviceId: string };
     /** Block origin on the ground (including its free input row) */
     x: number;
     y: number;
@@ -1134,7 +1137,10 @@ function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budg
     const can = capabilities(options.unlocks);
     const made = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
     // Purchasable raw materials come from portals in the module (raw side first) instead of the edge
-    const steps = options.buyRaw !== false && can.buy ? [...purchaseSteps(made, options.beltSpeed), ...made] : made;
+    const bought = options.buyRaw !== false && can.buy ? [...purchaseSteps(made, options.beltSpeed), ...made] : made;
+    // A machine whose whole output goes into one machine of the next step feeds it directly
+    const onBelt = new Set([...(options.finalProducts ?? []), ...(options.exportItems ?? []), ...(options.boughtItems ?? [])]);
+    const steps = pairSteps(bought, (item) => onBelt.has(item));
     // Upper levels are fed by lifts; decks need beams
     const allowed = (stacking: Stacking): Stacking =>
         !can.lifts || (stacking.kind === "beam-deck" && !can.beams) ? { kind: "none", pitch: stacking.pitch } : stacking;
@@ -1504,6 +1510,9 @@ function routeAndFinish(
           })
         : { placements: [], routes: [], io: [], surplus: [] };
     // Byproducts nobody takes end in a knowledge altar, trash barrel or dispatch portal
+    // Machine pairs back to their two machines (the router saw them as one)
+    routed.placements = expandPairs(routed.placements);
+    tiers = pairTiers(tiers);
     const disposed = attachDisposal(routed.placements, routed.io, (item) => finals.has(item) || products.has(item) || chosen.has(item), disposalFor(options, can), () => nextUid("x"));
     routed.placements = disposed.placements;
     routed.io = disposed.io;

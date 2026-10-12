@@ -29,6 +29,11 @@ export function getFootprint(id: string): BuildingFootprint | undefined {
     return BY_ID.get(id);
 }
 
+/** Adds a footprint the generator made up (machine pairs, see pairs.ts); not a real building */
+export function registerFootprint(fp: BuildingFootprint): void {
+    BY_ID.set(fp.id, fp);
+}
+
 export function rotateSide(side: Side, rot: Rotation): Side {
     return SIDES[(SIDES.indexOf(side) + rot) % 4];
 }
