@@ -74,6 +74,10 @@ export interface ModuleOptions {
     beltSpeed: number;
     /** Let belts cross gaps on drawbridge conveyors (needs the unlock; costs linen rope) */
     useBridges?: boolean;
+    /** Internal: items in the order the next module takes them in, for the purchasing portals' order */
+    portalOrder?: string[];
+    /** Internal: floor counted per raised lane when choosing block shapes (see LEVEL_LANE_FLOORS) */
+    levelLaneFloor?: number;
     /** The plan's targets: always sent out at the module edge */
     finalProducts?: string[];
     /** Surplus the player sends out at the edge (the rest stays in the line; final products always leave) */
@@ -410,8 +414,10 @@ function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Ro
         // Trim rows to what n needs
         const rows = Math.ceil(n / (shape.columns * shape.levels));
         const trimmed = { ...shape, rows, depth: blockDepth(rows, sy, shape.rowPitch, step.heating) + filterRows(step) };
-        // Floor space first; a few extra levels are cheap inside one storey
-        const score = trimmed.width * trimmed.depth * 100 + trimmed.levels;
+        // Floor space first, counting the lifts and raised belts each level above the floor needs
+        // for its in and out lane; a few extra levels are cheap inside one storey
+        const liftFloor = (trimmed.levels - 1) * LANES_PER_LEVEL * (opts.levelLaneFloor ?? 0);
+        const score = (trimmed.width * trimmed.depth + liftFloor) * 100 + trimmed.levels;
         if (score < bestScore) {
             best = trimmed;
             bestScore = score;
@@ -419,6 +425,14 @@ function chooseShape(step: ModuleStep, n: number, fp: BuildingFootprint, rot: Ro
     }
     return best ?? biggest!;
 }
+
+/** Lanes per stack level that need a lift down (in and out) */
+const LANES_PER_LEVEL = 2;
+/**
+ * Floor a raised lane takes outside the block (its lift and the belt on stands to it), tried
+ * both ways: not counted (stacks win) and counted (small blocks stay flat); the smaller module wins
+ */
+const LEVEL_LANE_FLOORS = [0, 3];
 
 let uidCounter = 0;
 const nextUid = (prefix: string) => `${prefix}-${++uidCounter}`;
@@ -1102,6 +1116,20 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
  * `finish`: tidy up the supports (off while it is one module of several: that comes last)
  */
 function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs: number, finish: boolean): GeneratedModule {
+    let best: GeneratedModule | null = null;
+    // One module of several: they line up front to back, so its depth counts most
+    const score = (m: GeneratedModule) => m.routes.filter((r) => !r.ok).length * 100000 + (finish ? m.size[0] * m.size[1] : m.size[1] * 100 + m.size[0]);
+    LEVEL_LANE_FLOORS.forEach((levelLaneFloor, k) => {
+        const n = LEVEL_LANE_FLOORS.length;
+        const onProgress = options.onProgress && ((f: number, label: string) => options.onProgress!((k + f) / n, label));
+        const result = generateBlocksWith(allSteps, { ...options, levelLaneFloor, onProgress }, budgetMs / n, finish);
+        if (!best || score(result) < score(best)) best = result;
+    });
+    options.onProgress?.(1, "Done");
+    return best!;
+}
+
+function generateBlocksWith(allSteps: ModuleStep[], options: ModuleOptions, budgetMs: number, finish: boolean): GeneratedModule {
     const blocks: { placements: Placement[]; info: TierInfo }[] = [];
     const can = capabilities(options.unlocks);
     const made = allSteps.map((st) => withUnlockedHeating(can.filters ? st : { ...st, unsorted: true }, can));
@@ -1356,7 +1384,12 @@ function layOut(
         return fed.length ? Math.min(...fed.map((j) => positions[j].x)) : 0;
     };
     let cursor = 0;
-    for (const i of [...front].sort((a, b) => wantX(a) - wantX(b))) {
+    // Without blocks to feed here (the portals' own module), the order of the next module's imports
+    const orderOf = (i: number) => {
+        const k = options.portalOrder?.indexOf(blocks[towers[i].members[0].index].info.itemName) ?? -1;
+        return k < 0 ? Infinity : k;
+    };
+    for (const i of [...front].sort((a, b) => wantX(a) - wantX(b) || orderOf(a) - orderOf(b))) {
         positions[i] = { x: cursor - (cursor > 0 ? corridor : 0), y: 0, rot: 0 };
         cursor += cursor > 0 ? portalWidth(i) : sizes[i].width - corridor + 1;
     }
@@ -1578,7 +1611,7 @@ function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], opti
     const report = (done: number, label: string) => (f: number, l: string) => options.onProgress?.((done + f) / stages, l ? `${label}: ${l}` : label);
     const products = groups.map((g, k) => (portals.length && k === 0 ? "purchasing" : g.tower ? g.steps[g.steps.length - 1].itemName : "other steps"));
     const started = Date.now();
-    const subs = groups.map((group, k) => {
+    const generateSub = (group: StepGroup, k: number, portalOrder?: string[]) => {
         // What other modules use leaves at the back, once this module's own machines took theirs
         const usedElsewhere = new Set(allSteps.filter((st) => !group.steps.includes(st)).flatMap((st) => [...st.inputs.map((i) => i.itemName), st.heating?.fuelItem ?? ""]));
         const sent = group.steps.flatMap((st) => st.outputs.map((o) => o.itemName)).filter((item) => usedElsewhere.has(item));
@@ -1598,9 +1631,24 @@ function generateGrouped(allSteps: ModuleStep[], chosenGroups: StepGroup[], opti
             exportItems: [...new Set([...(options.exportItems ?? []), ...sent])],
             exportCaps,
             onProgress: options.onProgress && report(k, `Module of ${products[k]}`),
+            portalOrder,
         };
         return generateBlocks(group.steps, opts, TIME_BUDGET_MS / stages, false);
+    };
+    // The other modules first: the portals then line up in the order their items come in
+    // there (left to right), so the belts between them don't cross
+    const subs: GeneratedModule[] = new Array(groups.length);
+    groups.forEach((group, k) => {
+        if (!(portals.length && k === 0)) subs[k] = generateSub(group, k);
     });
+    if (portals.length) {
+        const importX = new Map<string, number>();
+        for (const sub of subs.slice(1)) {
+            const minX = Math.min(...sub.placements.map((p) => p.x));
+            for (const p of sub.io) if (p.kind === "import" && !importX.has(p.itemName)) importX.set(p.itemName, p.cell[0] - minX);
+        }
+        subs[0] = generateSub(groups[0], 0, [...importX.entries()].sort((a, b) => a[1] - b[1]).map(([item]) => item));
+    }
 
     // Belts between modules: feeds[i][j] belts from module i come in at module j's front
     const madeIn = groups.map((g) => new Set(g.steps.flatMap((st) => st.outputs.map((o) => o.itemName))));
