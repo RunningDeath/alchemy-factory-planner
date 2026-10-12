@@ -30,6 +30,7 @@ import { PURCHASING_PORTAL, purchaseSteps } from "./purchasing";
 import { removeStraightLines } from "./compact";
 import { expandPairs, pairSteps, pairTiers } from "./pairs";
 import { PIPE_ID, pipeRisers } from "./pipes";
+import { addStarterBox } from "./starter";
 import { isFluidItem } from "../belt-analysis";
 import { getItem } from "../item-utils";
 import { capabilities, lockedBuildings, type BuildUnlocks, type Capabilities } from "./unlocks";
@@ -1530,6 +1531,10 @@ function routeAndFinish(
     routed.placements = disposed.placements;
     routed.io = disposed.io;
     if (finish) {
+        // Self-made fertilizer: a box in the nurseries' feed the player fills once to start
+        const made = new Set(tiers.flatMap((t) => t.lanes.filter((l) => l.kind === "out").flatMap((l) => l.items.map((i) => i.itemName))));
+        const fertilizers = new Set(tiers.filter((t) => t.deviceId.includes("nursery")).flatMap((t) => t.lanes.filter((l) => l.kind === "in").flatMap((l) => l.items.map((i) => i.itemName))));
+        for (const item of fertilizers) if (made.has(item) && !(options.boughtItems ?? []).includes(item)) routed.placements = addStarterBox(routed.placements, item, () => nextUid("sb"));
         // Rows and columns that only pass belts straight through go before the supports get cheaper
         const compact = removeStraightLines({ placements: routed.placements, io: routed.io, tiers });
         routed.placements = finishSupports(compact.placements, can);
