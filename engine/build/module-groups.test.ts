@@ -90,11 +90,15 @@ describe("suggestModuleGroups", () => {
         ]);
         // Every step is in exactly one group
         expect(groups.flat().sort()).toEqual(steps.map((s) => s.nodeKey).sort());
+        // A chain sending many belts into its module stays in it (y1 alone makes 200/min: 5 belts at 40/min)
+        const heavy = [step("y1", [], "Y1", 20), step("top", ["Y1"], "Top")];
+        expect(suggestModuleGroups(heavy, { maxSteps: 1, beltSpeed: 40 })).toEqual([["y1", "top"]]);
+        expect(suggestModuleGroups(heavy, { maxSteps: 1, beltSpeed: 100 })).toEqual([["y1"], ["top"]]);
     });
 
     test("Bandage 30/min: every step in one module, the shared flax fiber on its own", () => {
-        const { steps, finals } = bandageSteps(30);
-        const groups = suggestModuleGroups(steps, { finalProducts: finals });
+        const { steps, finals, beltSpeed } = bandageSteps(30);
+        const groups = suggestModuleGroups(steps, { finalProducts: finals, beltSpeed });
         expect(groups.flat().sort()).toEqual(steps.map((s) => s.nodeKey).sort());
         expect(groups.length).toBeGreaterThan(1);
         const fiber = groups.find((g) => moduleProduct(steps, g) === "Flax Fiber");
@@ -135,7 +139,7 @@ describe("generateModule with module groups", () => {
 
     test("Bandage 30/min with the suggested modules: valid, routed, groups together, in time", () => {
         const { steps, beltSpeed, finals } = bandageSteps(30);
-        const groups = suggestModuleGroups(steps, { finalProducts: finals });
+        const groups = suggestModuleGroups(steps, { finalProducts: finals, beltSpeed });
         const started = Date.now();
         const mod = generateModule(steps, { ...DEFAULT_MODULE_OPTIONS, beltSpeed, finalProducts: finals, moduleGroups: groups });
         expect(Date.now() - started).toBeLessThan(60_000);

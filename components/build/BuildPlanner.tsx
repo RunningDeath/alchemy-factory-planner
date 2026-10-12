@@ -17,6 +17,7 @@ import { BuildInfoPanel } from "./BuildInfoPanel";
 import { BuildPalette } from "./BuildPalette";
 import { BuildToolbar, type BuildViewMode } from "./BuildToolbar";
 import { LayerGrid, type BuildTool } from "./LayerGrid";
+import { ModuleGroupsPanel } from "./ModuleGroupsPanel";
 import { View3D } from "./View3D";
 
 const EMPTY: Placement[] = [];
@@ -166,8 +167,12 @@ export function BuildPlanner() {
             setLevel(0);
             setSelectedUid(null);
         };
-        // Final products always leave at the edge; surplus only if the player chose it
-        const request: GenerateRequest = { steps, options: { ...opts, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks } };
+        // Final products always leave at the edge; surplus only if the player chose it.
+        // Module groups only count while "Build as modules" is on
+        const request: GenerateRequest = {
+            steps,
+            options: { ...opts, moduleGroups: opts.modules ? opts.moduleGroups : undefined, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks },
+        };
         w.postMessage(request);
     };
 
@@ -325,7 +330,15 @@ export function BuildPlanner() {
             />
             {progress && <GenerateProgress fraction={progress.fraction} label={progress.label} onAbort={abortGenerate} />}
             <div className="flex flex-1 min-h-0">
-                <aside className="w-56 shrink-0 border-r border-[var(--border)] p-3 overflow-y-auto custom-scrollbar">
+                <aside className="w-56 shrink-0 border-r border-[var(--border)] p-3 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+                    <ModuleGroupsPanel
+                        steps={steps}
+                        enabled={!!options.modules}
+                        groups={options.moduleGroups ?? []}
+                        finalProducts={report?.targets.map((t) => t.itemName) ?? []}
+                        beltSpeed={report?.beltSpeed}
+                        onChange={(modules, moduleGroups) => setBuildLayout(factory.id, { ...(layout ?? { placements: [] }), options: { ...options, modules, moduleGroups } })}
+                    />
                     <BuildPalette steps={steps} placedByNode={placedByNode} tool={tool} onSelectTool={setTool} />
                 </aside>
 

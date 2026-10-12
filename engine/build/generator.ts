@@ -1352,25 +1352,34 @@ function moduleGroupsOf(steps: ModuleStep[], groups: string[][] | undefined): St
 }
 
 /**
- * Room for the belts between modules standing side by side: free cells between two modules
- * (a few, plus some per belt coming in from another module) and around them all; more of
- * both when routing fails
+ * How the modules are arranged, tried in this order until every belt routes:
+ * - row: side by side, fronts in line, with free cells between two modules (a few, plus
+ *   some per belt coming in from another module);
+ * - near / flow: like blocks in one module (see layOut), each module behind the modules
+ *   feeding it, so their outputs run straight into its inputs, with `corridor` free cells
+ *   around each module.
  */
+type ModuleArrangement = { mode: "row"; perBelt: number } | { mode: "near" | "flow"; corridor: number };
 const MODULE_GAP = 2;
-const MODULE_SPACINGS = [
-    { perBelt: 1, margin: ROUTING_MARGIN },
-    { perBelt: 2, margin: ROUTING_MARGIN * 2 },
+const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
+    { mode: "row", perBelt: 1 },
+    { mode: "near", corridor: 2 },
+    { mode: "flow", corridor: 2 },
+    { mode: "near", corridor: 4 },
+    { mode: "flow", corridor: 4 },
 ];
 
 /**
  * Build as modules: every group is laid out and routed on its own (inputs at its front,
- * outputs at its back), then the modules stand side by side and get belted together.
+ * outputs at its back), then the modules are set out (see ModuleArrangement) and belted
+ * together.
  */
 function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: ModuleOptions): GeneratedModule {
     const can = capabilities(options.unlocks);
-    const stages = groups.length + MODULE_SPACINGS.length;
+    const stages = groups.length + MODULE_ARRANGEMENTS.length;
     const report = (done: number, label: string) => (f: number, l: string) => options.onProgress?.((done + f) / stages, l ? `${label}: ${l}` : label);
     const products = groups.map((g) => (g.tower ? g.steps[g.steps.length - 1].itemName : "other steps"));
+    const started = Date.now();
     const subs = groups.map((group, k) => {
         // What other modules use leaves at the back, once this module's own machines took theirs
         const usedElsewhere = new Set(allSteps.filter((st) => !group.steps.includes(st)).flatMap((st) => [...st.inputs.map((i) => i.itemName), st.heating?.fuelItem ?? ""]));
@@ -1389,28 +1398,69 @@ function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: M
     const madeIn = groups.map((g) => new Set(g.steps.flatMap((st) => st.outputs.map((o) => o.itemName))));
     const feeds = subs.map((_, i) => subs.map((sub, j) => (i === j ? 0 : sub.io.filter((p) => p.kind === "import" && madeIn[i].has(p.itemName)).length)));
     const order = moduleOrder(feeds);
-    // Belts into a module come up the gaps beside it: each gap gets those from its side
-    const crossing = order.map((j, pos) => {
-        if (pos === 0) return 0;
-        const left = order.slice(0, pos);
-        const right = order.slice(pos);
-        return left.reduce((sum, i) => sum + feeds[i][j], 0) + right.reduce((sum, i) => sum + feeds[i][order[pos - 1]], 0);
-    });
     const names = order.map((k, pos) => `Module ${pos + 1} (${products[k]})`);
+    const ordered = order.map((k) => subs[k]);
+    const orderedFeeds = order.map((i) => order.map((j) => feeds[i][j]));
+    const boxes = ordered.map((sub) => cellBounds(sub.placements));
 
     const leftovers = leftoversOf(allSteps);
     const failed = (m: GeneratedModule) => m.routes.filter((r) => !r.ok).length;
     let best: GeneratedModule | null = null;
-    for (const [g, spacing] of MODULE_SPACINGS.entries()) {
-        const onProgress = options.onProgress && report(groups.length + g, `Belting ${subs.length} modules together`);
-        const gaps = crossing.map((n) => MODULE_GAP + n * spacing.perBelt);
-        const result = joinModules(order.map((k) => subs[k]), names, gaps, spacing.margin, { ...options, onProgress }, can, leftovers);
-        if (!best || failed(result) < failed(best)) best = result;
+    for (const [a, arrangement] of MODULE_ARRANGEMENTS.entries()) {
+        // Long enough: settle for the best so far (belting many modules together is slow when it fails)
+        if (best && Date.now() - started > TIME_BUDGET_MS) break;
+        const onProgress = options.onProgress && report(groups.length + a, `Belting ${subs.length} modules together (layout ${a + 1} of up to ${MODULE_ARRANGEMENTS.length})`);
+        const positions = arrangeModules(boxes, orderedFeeds, arrangement, options.maxWidth);
+        const result = joinModules(ordered, names, positions, { ...options, onProgress }, can, leftovers);
+        if (!best || failed(result) < failed(best) || (failed(result) === failed(best) && result.size[0] * result.size[1] < best.size[0] * best.size[1])) best = result;
         if (failed(best) === 0) break;
     }
     best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
     options.onProgress?.(1, "Done");
     return best!;
+}
+
+type Box = ReturnType<typeof cellBounds>;
+
+/** Where each module's front left corner goes */
+function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArrangement, maxWidth: number): { x: number; y: number }[] {
+    const sizes = boxes.map((b) => ({ width: b.maxX - b.minX + 1, depth: b.maxY - b.minY + 1 }));
+    if (arrangement.mode === "row") {
+        // Belts into a module come up the gaps beside it: each gap gets those from its side
+        let x = 0;
+        return sizes.map((size, pos) => {
+            if (pos > 0) {
+                const fromLeft = feeds.slice(0, pos).reduce((sum, row) => sum + row[pos], 0);
+                const fromRight = feeds.slice(pos).reduce((sum, row) => sum + row[pos - 1], 0);
+                x += MODULE_GAP + (fromLeft + fromRight) * arrangement.perBelt;
+            }
+            const at = { x, y: 0 };
+            x += size.width;
+            return at;
+        });
+    }
+    const c = arrangement.corridor;
+    const feeders = feeds.map((_, j) => feeds.map((row, i) => (row[j] > 0 ? i : -1)).filter((i) => i >= 0));
+    const stageMemo = new Map<number, number>();
+    const stageOf = (j: number, seen = new Set<number>()): number => {
+        if (stageMemo.has(j)) return stageMemo.get(j)!;
+        if (seen.has(j)) return 0;
+        seen.add(j);
+        const stage = feeders[j].length ? Math.max(...feeders[j].map((i) => stageOf(i, seen))) + 1 : 0;
+        stageMemo.set(j, stage);
+        return stage;
+    };
+    const items = sizes.map((size, j) => ({
+        width: size.width + 2 * c,
+        depth: size.depth + 2 * c,
+        stage: stageOf(j),
+        feeders: feeders[j],
+        feederWeights: feeders[j].map((i) => feeds[i][j]),
+    }));
+    // Room for two modules side by side, or one wide one
+    const width = Math.max(maxWidth, ...items.map((it) => it.width)) * 2;
+    const packed = arrangement.mode === "near" ? nearFeeders(items, width) : flowRows(items, width, 0, 0);
+    return packed.positions.map((p) => ({ x: p.x + c, y: p.y + c }));
 }
 
 /** Most modules for trying every order; past that they stay in production order */
@@ -1445,23 +1495,31 @@ function moduleOrder(feeds: number[][]): number[] {
 }
 
 function cellBounds(placements: Placement[]) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of placements)
         for (const c of placementCells(p)) {
             minX = Math.min(minX, c.x);
             minY = Math.min(minY, c.y);
             maxX = Math.max(maxX, c.x);
+            maxY = Math.max(maxY, c.y);
         }
-    return { minX, minY, maxX };
+    return { minX, minY, maxX, maxY };
 }
 
 /**
- * Stands the modules side by side with their fronts in line and belts them together:
+ * Sets the modules out at `positions` (their front left corners) and belts them together:
  * each module's imports and exports become lane ends, so the router feeds one module's
  * outputs into another's inputs, brings raw materials in at the front and sends the
  * products out at the back.
  */
-function joinModules(subs: GeneratedModule[], names: string[], gaps: number[], margin: number, options: ModuleOptions, can: Capabilities, leftovers: Set<string>): GeneratedModule {
+function joinModules(
+    subs: GeneratedModule[],
+    names: string[],
+    positions: { x: number; y: number }[],
+    options: ModuleOptions,
+    can: Capabilities,
+    leftovers: Set<string>,
+): GeneratedModule {
     const placements: Placement[] = [];
     const tiers: TierInfo[] = [];
     const routes: RouteResult[] = [];
@@ -1470,14 +1528,11 @@ function joinModules(subs: GeneratedModule[], names: string[], gaps: number[], m
     // Lane ends at a module's edge are owned by the whole module, named after the blocks
     const moduleBase = subs.reduce((sum, m) => sum + m.tiers.length, 0);
     const isEdge = (p: IoPoint) => p.kind === "import" || p.kind === "export";
-    let cursor = 0;
     subs.forEach((sub, k) => {
         if (sub.placements.length === 0) return;
-        // `gaps`: free cells to the left of each module
-        if (k > 0) cursor += gaps[k];
         const b = cellBounds(sub.placements);
-        const dx = cursor - b.minX;
-        const dy = -b.minY;
+        const dx = positions[k].x - b.minX;
+        const dy = positions[k].y - b.minY;
         const blockBase = tiers.length;
         const edges = new Map(sub.io.filter(isEdge).map((p) => [cellKey(p.cell[0], p.cell[1], p.cell[2]), p]));
         for (const p of sub.placements) {
@@ -1496,10 +1551,9 @@ function joinModules(subs: GeneratedModule[], names: string[], gaps: number[], m
         // Sinks stay; edge imports and exports are now belted to the other modules
         io.push(...sub.io.filter((p) => !isEdge(p)).map((p) => ({ ...p, cell: [p.cell[0] + dx, p.cell[1] + dy, p.cell[2]] as [number, number, number] })));
         sub.surplus.forEach((s) => surplus.set(s.itemName, (surplus.get(s.itemName) ?? 0) + s.rate));
-        cursor += b.maxX - b.minX + 1;
     });
 
-    const joined = routeAndFinish(placements, tiers, names, options, can, leftovers, true, margin);
+    const joined = routeAndFinish(placements, tiers, names, options, can, leftovers, true, ROUTING_MARGIN);
     joined.surplus.forEach((s) => surplus.set(s.itemName, (surplus.get(s.itemName) ?? 0) + s.rate));
     return {
         ...joined,

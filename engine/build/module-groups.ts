@@ -5,7 +5,8 @@
  * it (exclusive feeders: everything they make goes into that one step). A step that feeds
  * several steps, or makes a final product, starts a module of its own. A module with more
  * than `maxSteps` steps or `maxFloor` cells of machines is split at its biggest feeder
- * chain, until it fits or can't be split any more.
+ * chain, until it fits or can't be split any more. A chain that sends more than
+ * MAX_SPLIT_BELTS belts into its module stays: so many belts between modules don't route well.
  */
 import { getFootprint } from "./footprint";
 import type { ModuleStep } from "./generator";
@@ -17,10 +18,13 @@ export interface SuggestOptions {
     maxSteps?: number;
     /** Most machine floor per module, in cells (machines × footprint) */
     maxFloor?: number;
+    /** Belt speed in items per minute, to count the belts a feeder chain sends; absent: chains split anyway */
+    beltSpeed?: number;
 }
 
 export const DEFAULT_MAX_STEPS = 4;
 export const DEFAULT_MAX_FLOOR = 150;
+export const MAX_SPLIT_BELTS = 4;
 
 /** What a step takes in, fuel included (it travels on a belt too) */
 function takes(st: ModuleStep): Set<string> {
@@ -82,7 +86,12 @@ export function suggestModuleGroups(steps: ModuleStep[], options: SuggestOptions
         const group = queue.shift()!;
         const members = new Set(group);
         const root = group.find((k) => !members.has(parent.get(k) ?? ""))!;
-        const chains = children(root, members).map((c) => subtree(c, members));
+        // Belts from the chain into the rest: everything its first step makes
+        const belts = (head: string) => {
+            const st = byKey.get(head)!;
+            return options.beltSpeed ? (Math.ceil(st.machines) * st.outputs.reduce((sum, o) => sum + o.perMachineRate, 0)) / options.beltSpeed : 0;
+        };
+        const chains = children(root, members).filter((c) => belts(c) <= MAX_SPLIT_BELTS).map((c) => subtree(c, members));
         if ((group.length <= maxSteps && floor(group) <= maxFloor) || chains.length === 0) {
             groups.push(group);
             continue;
