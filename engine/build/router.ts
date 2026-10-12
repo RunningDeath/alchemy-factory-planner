@@ -770,7 +770,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             let joinable = false;
             for (const n of nodes.values()) {
                 if (n.lift || n.items.size !== 1 || !n.items.has(conn.itemName) || !n.tree?.startsWith("import:")) continue;
-                if ((treeTotals.get(n.tree) ?? 0) + conn.rate > options.beltSpeed + 1e-6) continue;
+                // Money always comes in on one line (the player feeds it); other items while it has room
+                if (!options.singleImport?.(conn.itemName) && (treeTotals.get(n.tree) ?? 0) + conn.rate > options.beltSpeed + 1e-6) continue;
                 joinable = true;
                 for (const side of SIDES) if (canAdd(n, side, "out")) starts.push({ cell: add(n.cell, side), inSide: oppositeSide(side), branchFrom: n });
             }

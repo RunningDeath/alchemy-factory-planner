@@ -13,6 +13,8 @@ export interface EfficiencyContext {
   /** Share of self-made fertilizer planned above what the nurseries eat */
   fertilizerReserve: number;
   useCauldron: boolean;
+  /** Advanced cauldron recipes too (two inputs) */
+  useAdvancedCauldron: boolean;
   /** Cost of one machine in the objective, next to raw material cost (0: raw cost only) */
   machineWeight: number;
   cauldronBuyInputs: boolean;

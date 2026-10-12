@@ -3,7 +3,7 @@ import { PlannerConfig, ProductionNode, Recipe } from "../types";
 import { EfficiencyContext, EPSILON } from "./types";
 import { getItem, getDevice, getRecipeById, getAllRecipes } from "./model-builder";
 import { isAlchemyMachine } from "./efficiency";
-import { normalizeItemId, getEffectiveRecipeTime as effectiveRecipeTime } from "../item-utils";
+import { normalizeItemId, getEffectiveRecipeTime as effectiveRecipeTime, recipeNutrients } from "../item-utils";
 
 /** Nursery cycle time depends on the selected fertilizer and is capped at one belt (see item-utils). */
 function getEffectiveRecipeTime(recipe: Recipe, ctx: EfficiencyContext): number {
@@ -350,21 +350,12 @@ function calculateItemFlows(
     if (isNursery && ctx.selectedFertilizer) {
       const fertilizerId = normalizeItemId(ctx.selectedFertilizer);
       const fertilizerItem = getItem(fertilizerId);
-      const outputDef = recipe.outputs[0];
-      const outputId = outputDef?.id || (outputDef ? normalizeItemId(outputDef.name) : "");
-      const outputItem = outputId ? getItem(outputId) : null;
+      const nutrients = recipeNutrients(recipe);
 
-      if (fertilizerItem?.nutrient_value && outputItem?.required_nutrients) {
+      if (fertilizerItem?.nutrient_value && nutrients > 0) {
         const flow = getOrCreateFlow(fertilizerId);
-
-        // Fertilizer consumption: nutrients are per OUTPUT ITEM, not per cycle
-        // Each Flax needs 24 nutrients, so per cycle (200 Flax) = 200 * 24 nutrients
-        const outputCount = typeof recipe.outputs[0].count === "string"
-          ? parseFloat(recipe.outputs[0].count)
-          : recipe.outputs[0].count;
-        // Fertilizer Efficiency raises the nutrients each fertilizer item gives
-        const effectiveNutrientValue = fertilizerItem.nutrient_value * ctx.fertilizerMultiplier;
-        const fertilizerPerActivation = (outputCount * outputItem.required_nutrients) / effectiveNutrientValue;
+        // Every output's nutrients; Fertilizer Efficiency raises the nutrients each fertilizer item gives
+        const fertilizerPerActivation = nutrients / (fertilizerItem.nutrient_value * ctx.fertilizerMultiplier);
         const rate = activationRate * fertilizerPerActivation;
 
         flow.consumed += rate;

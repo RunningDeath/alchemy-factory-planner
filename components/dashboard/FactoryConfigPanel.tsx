@@ -117,12 +117,13 @@ export function FactorySettingsPanel({
         machineRounding: activeFactory.config.machineRounding ?? DEFAULT_ROUNDING,
         useCauldron: activeFactory.config.useCauldron ?? false,
         cauldronBuyInputs: activeFactory.config.cauldronBuyInputs ?? false,
+        useAdvancedCauldron: activeFactory.config.useAdvancedCauldron ?? false,
     };
 
     const sortedFertilizers = [...fertilizers].sort((a, b) => (a.nutrient_value || 0) - (b.nutrient_value || 0));
     const sortedFuels = [...fuels].sort((a, b) => (a.heat_value || 0) - (b.heat_value || 0));
 
-    const updateConfig = (field: "selectedFertilizer" | "selectedFuel" | "selfFuel" | "selfFertilizer" | "planParallelLines" | "machineRounding" | "useCauldron" | "cauldronBuyInputs", value: string | boolean) => {
+    const updateConfig = (field: "selectedFertilizer" | "selectedFuel" | "selfFuel" | "selfFertilizer" | "planParallelLines" | "machineRounding" | "useCauldron" | "cauldronBuyInputs" | "useAdvancedCauldron", value: string | boolean) => {
         updateFactoryConfig(activeFactory.id, { [field]: value });
     };
 
@@ -249,6 +250,16 @@ export function FactorySettingsPanel({
                                 className="accent-[var(--accent-gold)] cursor-pointer"
                             />
                             <span>Buy cauldron inputs at the portal (seeds, sigils, ores)</span>
+                        </label>
+                        <label className={`flex items-center gap-2 text-xs text-[var(--text-secondary)] transition-colors ${config.useCauldron ? "cursor-pointer hover:text-[var(--text-primary)]" : "opacity-40"}`}>
+                            <input
+                                type="checkbox"
+                                checked={config.useAdvancedCauldron}
+                                disabled={!config.useCauldron}
+                                onChange={(e) => updateConfig("useAdvancedCauldron", e.target.checked)}
+                                className="accent-[var(--accent-gold)] cursor-pointer"
+                            />
+                            <span>Advanced cauldron too (two inputs, level 8)</span>
                         </label>
                     </div>
                 </div>

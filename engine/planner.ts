@@ -1,7 +1,7 @@
 import devicesData from "../data/devices.json";
 import recipesData from "../data/recipes.json";
 import { Device, Item, PlannerConfig, ProductionNode, Recipe } from "./types";
-import { normalizeItemId, getItem, getAllItems, getEffectiveRecipeTime } from "./item-utils";
+import { normalizeItemId, getItem, getAllItems, getEffectiveRecipeTime, recipeNutrients } from "./item-utils";
 import { beltSpeedForLevel, factorySpeedMultiplier } from "./game-constants";
 
 // Index data for fast lookups
@@ -239,7 +239,9 @@ function solveNode(
         const fertilizerId = normalizeItemId(ctx.selectedFertilizer);
         const fertilizerItem = itemsMap.get(fertilizerId);
 
-        if (fertilizerItem && item.required_nutrients) {
+        // Nutrients per item of this node: the recipe's total over every output it makes
+        const nutrientsPerItem = outputCount > 0 ? recipeNutrients(recipe) / outputCount : 0;
+        if (fertilizerItem && nutrientsPerItem > 0) {
             const nutrientValue = fertilizerItem.nutrient_value || 0;
             // Growth is nutrient-driven: cycle time = nutrients per cycle / fertilizer delivery rate
             const growthTime = getEffectiveRecipeTime(recipe, ctx.selectedFertilizer, 1 + ctx.fertilizerEfficiency * 0.1, {
@@ -252,7 +254,7 @@ function solveNode(
             // - Each Flax needs 24 nutrients
             // - Fertilizer per Flax = 24 / 144 = 0.1667 units
             // Fertilizer Efficiency raises the nutrients each fertilizer item gives
-            const fertNeededPerItem = item.required_nutrients / (nutrientValue * (1 + ctx.fertilizerEfficiency * 0.1));
+            const fertNeededPerItem = nutrientsPerItem / (nutrientValue * (1 + ctx.fertilizerEfficiency * 0.1));
             const totalFertilizerRate = neededRate * fertNeededPerItem;
 
             fertilizerInput = {

@@ -92,6 +92,7 @@ export function buildEfficiencyContext(config: PlannerConfig): EfficiencyContext
     selfFertilizer: config.selfFertilizer ?? true,
     fertilizerReserve: config.fertilizerReserve ?? 0,
     useCauldron: config.useCauldron ?? false,
+    useAdvancedCauldron: (config.useCauldron ?? false) && (config.useAdvancedCauldron ?? false),
     // Fewer machines always count for something (rock salt in a crusher beats a 150-machine
     // quicklime chain to save coins); with the cauldron a simpler factory is the whole point
     machineWeight: config.machineWeight ?? (config.useCauldron ? DEFAULT_MACHINE_WEIGHT : BASE_MACHINE_WEIGHT),

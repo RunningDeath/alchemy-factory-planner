@@ -3,6 +3,7 @@ import { PlannerConfig, ProductionNode } from "../types";
 import { buildEfficiencyContext } from "./efficiency";
 import { buildLPModel } from "./model-builder";
 import { interpretSolution } from "./solution-interpreter";
+import { cauldronRecipeById } from "../cauldron";
 
 /**
  * Calculate production using Linear Programming (Matrix Solver).
@@ -45,9 +46,9 @@ export function calculateProductionLP(config: PlannerConfig): ProductionNode[] {
   if (ctx.useCauldron && solution.status === "optimal") {
     const best = new Map<string, { id: string; rate: number }>();
     for (const [name, value] of solution.variables) {
-      if (!name.startsWith("recipe_cauldron-") || value <= 0) continue;
+      if (!/^recipe_(adv)?cauldron-/.test(name) || value <= 0) continue;
       const id = name.slice("recipe_".length);
-      const output = id.slice("cauldron-".length).split("-")[0];
+      const output = cauldronRecipeById(id)?.outputs[0].id ?? id;
       if ((best.get(output)?.rate ?? 0) < value) best.set(output, { id, rate: value });
     }
     if (best.size > 0) {

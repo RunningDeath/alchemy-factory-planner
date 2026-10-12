@@ -62,9 +62,21 @@ export function getEffectiveRecipeTime(
   if (recipe.crafted_in?.toLowerCase() !== "nursery") return recipe.time;
   const growthTime = getNurseryGrowthTime(recipe, selectedFertilizer, fertilizerMultiplier);
   if (!beltCap || beltCap.beltSpeed <= 0) return growthTime;
-  const largestOutput = Math.max(...recipe.outputs.map(parseCount));
-  const beltLimitedTime = (largestOutput * 60 * beltCap.speedMultiplier) / beltCap.beltSpeed;
+  // All belt outputs share one output belt: together they can't pass more than its speed
+  const beltOutputs = recipe.outputs.reduce((sum, o) => sum + parseCount(o), 0);
+  const beltLimitedTime = (beltOutputs * 60 * beltCap.speedMultiplier) / beltCap.beltSpeed;
   return Math.max(growthTime, beltLimitedTime);
+}
+
+/**
+ * Nutrients one nursery cycle takes: every output counts (gentian nectar comes with 80
+ * gentian, and those need 6000 each), not just the first one listed
+ */
+export function recipeNutrients(recipe: Recipe): number {
+  return recipe.outputs.reduce((sum, o) => {
+    const share = o.percentage === undefined ? 1 : parseFloat(String(o.percentage)) / 100;
+    return sum + parseCount(o) * share * (getItem(o.id || o.name)?.required_nutrients || 0);
+  }, 0);
 }
 
 function getNurseryGrowthTime(
@@ -75,9 +87,7 @@ function getNurseryGrowthTime(
   if (!selectedFertilizer) return recipe.time;
   const nutrientsPerSec = getItem(selectedFertilizer)?.nutrients_per_seconds;
   if (!nutrientsPerSec) return recipe.time;
-  const nutrientsPerCycle = recipe.outputs.reduce((sum, o) => {
-    return sum + parseCount(o) * (getItem(o.id || o.name)?.required_nutrients || 0);
-  }, 0);
+  const nutrientsPerCycle = recipeNutrients(recipe);
   // The Fertilizer Efficiency bonus raises the nutrient value per fertilizer item (fewer items
   // eaten), not how fast a nursery takes nutrients in: growth speed is the fertilizer's own
   // (checked in game: a Growth Potion lasts 6480 x 1.1 / 1980 = 3.6 s in a belt-capped nursery)

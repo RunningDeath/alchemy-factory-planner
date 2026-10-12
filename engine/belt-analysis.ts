@@ -164,27 +164,32 @@ export function perMachineFlows(
   const perMinute = 60 / cycleSeconds;
   const alchemyBonus = isAlchemyMachine(machineName) ? ctx.alchemyMultiplier : 1;
 
-  const outputs = recipe.outputs.map((o) => ({
+  const rawOutputs = recipe.outputs.map((o) => ({
     itemName: getItem(o.id || o.name)?.name || o.name,
     rate: parseNumber(o.count, 1) * (parseNumber(o.percentage, 100) / 100) * alchemyBonus * perMinute,
   }));
+  // A machine's outputs leave on one belt: together no faster than it moves, or the machine waits
+  const onBelt = rawOutputs.filter((o) => !isFluidItem(o.itemName)).reduce((sum, o) => sum + o.rate, 0);
+  const throttle = !isNursery && onBelt > ctx.beltLimit ? ctx.beltLimit / onBelt : 1;
+  const outputs = rawOutputs.map((o) => ({ ...o, rate: o.rate * throttle }));
 
   const inputs = recipe.inputs
     // Nursery seeds are planted once, not consumed per cycle
     .filter((i) => !(isNursery && getItem(i.id || i.name)?.name.toLowerCase().endsWith(" seeds")))
     .map((i) => ({
       itemName: getItem(i.id || i.name)?.name || i.name,
-      rate: i.count * perMinute,
+      rate: i.count * perMinute * throttle,
     }));
 
   if (isNursery && ctx.selectedFertilizer) {
     const fertilizer = getItem(ctx.selectedFertilizer);
-    const plant = getItem(normalizeItemId(recipe.outputs[0].id || recipe.outputs[0].name));
-    if (fertilizer?.nutrient_value && plant?.required_nutrients && outputs[0]) {
+    // Every output's nutrients (gentian nectar comes with gentian, and those are hungry)
+    const nutrientsPerMinute = outputs.reduce((sum, o) => sum + o.rate * (getItem(o.itemName)?.required_nutrients ?? 0), 0);
+    if (fertilizer?.nutrient_value && nutrientsPerMinute > 0) {
       inputs.push({
         itemName: fertilizer.name,
         // Fertilizer Efficiency raises the nutrients each fertilizer item gives
-        rate: (outputs[0].rate * plant.required_nutrients) / (fertilizer.nutrient_value * ctx.fertilizerMultiplier),
+        rate: nutrientsPerMinute / (fertilizer.nutrient_value * ctx.fertilizerMultiplier),
       });
     }
   }

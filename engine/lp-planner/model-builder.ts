@@ -4,8 +4,8 @@ import recipesData from "../../data/recipes.json";
 import { Device, Item, PlannerConfig, Recipe } from "../types";
 import { EfficiencyContext, EPSILON } from "./types";
 import { isAlchemyMachine } from "./efficiency";
-import { normalizeItemId, getItem as getItemById, getAllItems, getEffectiveRecipeTime } from "../item-utils";
-import { cauldronRecipeById, cauldronRecipesFor, PLANT_BASED } from "../cauldron";
+import { normalizeItemId, getItem as getItemById, getAllItems, getEffectiveRecipeTime, recipeNutrients } from "../item-utils";
+import { advancedCauldronRecipesFor, cauldronRecipeById, cauldronRecipesFor, PLANT_BASED } from "../cauldron";
 
 /** Plant-based cauldron inputs: grown, or made from one plant alone */
 const PLANTS = PLANT_BASED;
@@ -175,35 +175,17 @@ export function buildLPModel(
     if (isNursery && ctx.selectedFertilizer) {
       const fertilizerId = normalizeItemId(ctx.selectedFertilizer);
       const fertilizerItem = itemsMap.get(fertilizerId);
-      // Get the output item to check its required_nutrients
-      const outputDef = recipe.outputs[0];
-      const outputId = outputDef.id || normalizeItemId(outputDef.name);
-      const outputItem = itemsMap.get(outputId);
+      // Nutrients per cycle over every output (see recipeNutrients)
+      const nutrients = recipeNutrients(recipe);
 
-      if (fertilizerItem?.nutrient_value && outputItem?.required_nutrients) {
+      if (fertilizerItem?.nutrient_value && nutrients > 0) {
         allItems.add(fertilizerId);
-
-        // Get output count for later use
-        const outputCount = typeof outputDef.count === "string"
-          ? parseFloat(outputDef.count)
-          : outputDef.count;
-        const outputPercentage = outputDef.percentage
-          ? (typeof outputDef.percentage === "string"
-            ? parseFloat(outputDef.percentage)
-            : outputDef.percentage)
-          : 100;
-        const effectiveOutputCount = outputCount * (outputPercentage / 100);
-
-        // Calculate fertilizer needed per recipe activation
-        // Nutrients are per OUTPUT ITEM, not per cycle!
-        // Each Flax needs 24 nutrients, so total = outputCount * 24
-        // Fertilizer consumption = (outputCount * required_nutrients) / nutrient_value
         // Fertilizer Efficiency raises the nutrients each fertilizer item gives
         const effectiveNutrientValue = fertilizerItem.nutrient_value * ctx.fertilizerMultiplier;
         // Self-made fertilizer gets a reserve: the loop is planned with room to spare, so a slow start
         // or an uneven split doesn't starve a nursery (what they don't eat leaves as product)
         const reserve = ctx.selfFertilizer ? 1 + ctx.fertilizerReserve : 1;
-        const fertilizerPerActivation = ((effectiveOutputCount * outputItem.required_nutrients) / effectiveNutrientValue) * reserve;
+        const fertilizerPerActivation = (nutrients / effectiveNutrientValue) * reserve;
 
         const current = recipeCoeffs.get(fertilizerId) || 0;
         recipeCoeffs.set(fertilizerId, current - fertilizerPerActivation);
@@ -256,10 +238,10 @@ export function buildLPModel(
     if (ctx.machineWeight > 0) {
       const machines = recipeTime / (60 * ctx.speedMultiplier);
       // Cauldron mixes of plants are preferred: light, and a nursery is all they need
-      const cauldron = recipe.crafted_in === "cauldron";
-      const heavySlots = cauldron ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
+      const slots = recipe.crafted_in === "cauldron" ? 3 : recipe.crafted_in === "advanced-cauldron" ? 2 : 0;
+      const heavySlots = slots ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
       // An item in two slots: the first fills up completely before the second gets any (a slow start)
-      const sharedSlots = cauldron ? 3 - recipe.inputs.length : 0;
+      const sharedSlots = slots ? slots - recipe.inputs.length : 0;
       // A heated machine (crucible, kiln) needs a stove or heating pad under it too
       const heated = !!device?.heat_consuming_speed && device.category !== "heating" ? HEATED_COST : 0;
       machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heated + heavySlots * NON_PLANT_SLOT_COST + sharedSlots * SHARED_SLOT_COST));
@@ -441,7 +423,10 @@ export function getRecipeById(id: string): Recipe | undefined {
  */
 function recipesFor(ctx: EfficiencyContext): Recipe[] {
   if (!ctx.useCauldron) return allRecipes;
-  const cauldron = cauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs }).filter((r) => !ctx.cauldronOnly || ctx.cauldronOnly.has(r.id));
+  const cauldron = [
+    ...cauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs }),
+    ...(ctx.useAdvancedCauldron ? advancedCauldronRecipesFor({ buyInputs: ctx.cauldronBuyInputs }) : []),
+  ].filter((r) => !ctx.cauldronOnly || ctx.cauldronOnly.has(r.id));
   const replaced = new Set(cauldron.map((r) => r.outputs[0].id));
   const primary = (r: Recipe) => r.outputs[0]?.id || normalizeItemId(r.outputs[0]?.name ?? "");
   return [...allRecipes.filter((r) => !replaced.has(primary(r))), ...cauldron];

@@ -126,6 +126,8 @@ export interface PlannerConfig {
   machineRounding?: RoundingMode; // Whole machines at full speed: round up/down, or exact fractions (default "up")
   /** Make materials in the cauldron where that takes fewer steps than their usual chain */
   useCauldron?: boolean;
+  /** Also the advanced cauldron (two inputs; needs level 8) */
+  useAdvancedCauldron?: boolean;
   /** Cauldron inputs may be bought at the purchasing portal (else they are made in the factory) */
   cauldronBuyInputs?: boolean;
   /** Cost of one machine next to raw material cost (default: 0, or a fixed weight with the cauldron on) */

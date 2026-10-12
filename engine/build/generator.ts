@@ -903,7 +903,6 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
     const heating = step.heating!;
     const placements: Placement[] = [];
     const belts: Placement[] = [];
-    const cols = Math.ceil(width / 3);
     const top = origin.y;
     let devices = 0;
     let platformDepth = 0;
@@ -915,14 +914,32 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
         for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) if (heatedCells.has(`${x + dx},${y + dy}`)) return true;
         return false;
     };
+    // Heater columns where the machines stand, not on a fixed grid: each starts at the first
+    // machine cell no heater covers yet, so a 3-wide machine sits on one heater, not two
+    const machineXs = [...new Set([...heatedCells].map((k) => Number(k.split(",")[0]) - origin.x))].sort((a, b) => a - b);
+    const xs: number[] = [];
+    for (const x of machineXs) {
+        const prev = xs.length ? xs[xs.length - 1] : -Infinity;
+        if (x <= prev + 2) continue;
+        // Stay inside the block; never overlap the heater before
+        xs.push(Math.max(prev + 3, Math.min(x, width - 3)));
+    }
 
     if (heating.kind === "steam") {
-        const rows = Math.ceil(depth / 3);
-        for (let r = 0; r < rows; r++) {
+        // Rows the same way: where the machines stand
+        const machineYs = [...new Set([...heatedCells].map((k) => Number(k.split(",")[1]) - top))].sort((a, b) => a - b);
+        const ys: number[] = [];
+        for (const y of machineYs) {
+            const prev = ys.length ? ys[ys.length - 1] : -Infinity;
+            if (y <= prev + 2) continue;
+            ys.push(Math.max(prev + 3, Math.min(y, depth - 3)));
+        }
+        const rows = ys.length;
+        for (const [r, ry] of ys.entries()) {
             let first = true;
-            for (let c = 0; c < cols; c++) {
-                const x = origin.x + c * 3;
-                const y = top + r * 3;
+            for (const cx of xs) {
+                const x = origin.x + cx;
+                const y = top + ry;
                 if (!underMachine(x, y)) {
                     // A gap breaks the chain: the next heater takes the steam again
                     first = true;
@@ -934,7 +951,7 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
                 first = false;
                 placements.push(heater);
                 devices++;
-                platformDepth = Math.max(platformDepth, (r + 1) * 3);
+                platformDepth = Math.max(platformDepth, ry + 3);
             }
         }
     } else {
@@ -944,8 +961,8 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
             const lower = y0 + FUEL_ROW + 1 < depth;
             const upperAt = new Set<number>();
             const lowerAt = new Set<number>();
-            for (let c = 0; c < cols; c++) {
-                const x = origin.x + c * 3;
+            for (const [c, cx] of xs.entries()) {
+                const x = origin.x + cx;
                 if (underMachine(x, top + y0)) {
                     placements.push({ uid: nextUid("h"), id: STOVE_ID, x, y: top + y0, z: 0, rot: 0 });
                     upperAt.add(c);
@@ -962,13 +979,14 @@ function heatingPlatform(step: ModuleStep, width: number, depth: number, origin:
             fuelRows.push(y0 + FUEL_ROW);
             platformDepth = lowerAt.size ? y0 + STOVE_UNIT : y0 + FUEL_ROW + 1;
             // Fuel belt: in from the left, splitting up and down into the stoves' fuel ports
-            const lastPort = Math.max(...used) * 3 + 1;
+            // Each stove's fuel port is in the middle of its side
+            const portOf = new Map(xs.map((cx, c) => [cx + 1, c]));
+            const lastPort = Math.max(...used.map((c) => xs[c])) + 1;
             for (let x = 0; x <= lastPort; x++) {
-                const c = Math.floor(x / 3);
-                const port = x % 3 === 1;
+                const c = portOf.get(x);
                 const outs: Side[] = [];
-                if (port && upperAt.has(c)) outs.push("up");
-                if (port && lowerAt.has(c)) outs.push("down");
+                if (c !== undefined && upperAt.has(c)) outs.push("up");
+                if (c !== undefined && lowerAt.has(c)) outs.push("down");
                 if (x < lastPort) outs.push("right");
                 const piece = beltPieceFor(["left"], outs) ?? beltPieceFor(["left"], ["right"])!;
                 const belt: Placement = { uid: nextUid("b"), id: piece.id, x: origin.x + x, y: top + y0 + FUEL_ROW, z: 1, rot: piece.rot, lane: "in", label: heating.fuelItem, nodeKey: step.nodeKey };
@@ -1024,18 +1042,21 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
     const levels = Math.min(maxLevels, count);
     const columns = Math.ceil(count / levels);
 
-    // Ports by side: which input item each one takes (an item used twice takes two ports)
+    // Input ports from the footprint (cauldron: top, bottom, left; advanced cauldron: two on the
+    // left, one above the other); the stub cell is the one in front of each port
+    const inPorts = fp.ports.filter((p) => p.medium === "belt" && p.dir === "in");
+    const outPort = fp.ports.find((p) => p.medium === "belt" && p.dir === "out")!;
+    const inSides = inPorts.map((p) => {
+        const side = p.face as Side;
+        return { side, dx: p.x + SIDE_OFFSET[side][0], dy: p.y + SIDE_OFFSET[side][1], dz: p.z };
+    });
+    // Which input item each port takes (an item used twice takes two ports)
     const portItems: StepFlow[] = [];
     const totalCount = step.inputs.reduce((s, f) => s + f.perMachineRate, 0) || 1;
     for (const f of step.inputs) {
-        const ports = Math.max(1, Math.round((f.perMachineRate / totalCount) * 3));
-        for (let k = 0; k < ports && portItems.length < 3; k++) portItems.push({ itemName: f.itemName, perMachineRate: f.perMachineRate / ports });
+        const ports = Math.max(1, Math.round((f.perMachineRate / totalCount) * inPorts.length));
+        for (let k = 0; k < ports && portItems.length < inPorts.length; k++) portItems.push({ itemName: f.itemName, perMachineRate: f.perMachineRate / ports });
     }
-    const inSides: { side: Side; dx: number; dy: number }[] = [
-        { side: "up", dx: 1, dy: -1 },
-        { side: "down", dx: 1, dy: 3 },
-        { side: "left", dx: -1, dy: 1 },
-    ];
 
     const placements: Placement[] = [];
     const stubs: Placement[] = [];
@@ -1057,19 +1078,19 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
         for (let level = 0; level < levels && placed < count; level++, placed++) {
             const z = baseZ + level * pitch;
             placements.push({ uid: nextUid("m"), id: step.deviceId, x, y, z, rot: 0, nodeKey: step.nodeKey, label: step.itemName });
-            const portZ = z + 1;
             portItems.forEach((flow, k) => {
-                const { side, dx, dy } = inSides[k];
+                const { side, dx, dy, dz } = inSides[k];
                 // The stub sits on the port's side and runs into the cauldron
                 const piece = beltPieceFor([side], [oppositeSide(side)])!;
                 stubs.push({
-                    uid: nextUid("b"), id: piece.id, x: x + dx, y: y + dy, z: portZ, rot: piece.rot, lane: "in", label: flow.itemName, nodeKey: step.nodeKey,
+                    uid: nextUid("b"), id: piece.id, x: x + dx, y: y + dy, z: z + dz, rot: piece.rot, lane: "in", label: flow.itemName, nodeKey: step.nodeKey,
                     laneEnd: { kind: "in", items: [{ itemName: flow.itemName, rate: flow.perMachineRate }] },
                 });
             });
-            const out = beltPieceFor(["left"], ["right"])!;
+            const outSide = outPort.face as Side;
+            const out = beltPieceFor([oppositeSide(outSide)], [outSide])!;
             stubs.push({
-                uid: nextUid("b"), id: out.id, x: x + 3, y: y + 1, z: portZ, rot: out.rot, lane: "out", label: step.outputs.map((o) => o.itemName).join(" + "), nodeKey: step.nodeKey,
+                uid: nextUid("b"), id: out.id, x: x + outPort.x + SIDE_OFFSET[outSide][0], y: y + outPort.y + SIDE_OFFSET[outSide][1], z: z + outPort.z, rot: out.rot, lane: "out", label: step.outputs.map((o) => o.itemName).join(" + "), nodeKey: step.nodeKey,
                 laneEnd: { kind: "out", items: step.outputs.map((o) => ({ itemName: o.itemName, rate: o.perMachineRate })) },
             });
         }

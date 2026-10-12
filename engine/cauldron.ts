@@ -127,6 +127,9 @@ export interface CauldronOptions {
     buyInputs: boolean;
 }
 
+/** Recipe ids of the advanced cauldron start with this */
+const ADVANCED_PREFIX = "advcauldron";
+
 /** Materials worth putting in: a cauldron value, not a fluid, and bought or made from bought ones in a step or two */
 const MAX_INPUT_STEPS = 2;
 const candidates = items
@@ -177,16 +180,16 @@ function allMixes(): Map<string, Variant[]> {
 
 let mixes: Map<string, Variant[]> | null = null;
 
-function toRecipe(out: string, v: Variant): CauldronRecipe {
+function toRecipe(out: string, v: Variant, machine: "cauldron" | "advanced-cauldron" = "cauldron"): CauldronRecipe {
     const item = itemById.get(out)!;
     const counts = new Map<string, { id: string; name: string; count: number }>();
     for (const p of v.picks) counts.set(p.id, { id: p.id, name: p.name, count: (counts.get(p.id)?.count ?? 0) + 1 });
     return {
-        id: `cauldron-${out}-${v.picks.map((p) => p.id).join("+")}`,
+        id: `${machine === "cauldron" ? "cauldron" : ADVANCED_PREFIX}-${out}-${v.picks.map((p) => p.id).join("+")}`,
         inputs: [...counts.values()],
         outputs: [{ id: out, name: item.name, count: 1 }],
         time: cauldronTime(item.cauldron_target!),
-        crafted_in: "cauldron",
+        crafted_in: machine,
         steps: v.steps,
         usualSteps: productionSteps(out),
         buysInputs: v.bought,
@@ -231,10 +234,91 @@ export function cauldronRecipesFor(options: CauldronOptions): CauldronRecipe[] {
     return result;
 }
 
+/**
+ * The advanced cauldron (two slots). The same material twice: its cauldron value, and out
+ * comes the material with the next higher target (not the input itself). Two different
+ * ones: the difference of their values, and out comes the material whose target is nearest
+ * it among those below the higher value (not the dearer input). Rules as in the community
+ * calculator (starfi5h's AlchemyFactoryCalculator).
+ */
+export function advancedCauldronOutput(a: string, b: string): string | null {
+    const [ca, cb] = [itemById.get(a)?.cauldron_cost, itemById.get(b)?.cauldron_cost];
+    if (ca === undefined || cb === undefined || outputs.length === 0) return null;
+    if (a === b) {
+        let best: string | null = null;
+        let bestDistance = Infinity;
+        for (const o of outputs) {
+            const d = o.target - ca;
+            if (d > 1e-7 && d < bestDistance && o.id !== a) {
+                best = o.id;
+                bestDistance = d;
+            }
+        }
+        return best ?? outputs[outputs.length - 1].id;
+    }
+    const t = Math.abs(ca - cb);
+    const [higher, higherCost] = ca > cb ? [a, ca] : [b, cb];
+    let best: string | null = null;
+    let bestDistance = Infinity;
+    for (const o of outputs) {
+        const d = Math.abs(t - o.target);
+        if (d < bestDistance && o.target < higherCost && o.id !== higher) {
+            best = o.id;
+            bestDistance = d;
+        }
+    }
+    return best ?? outputs[0].id;
+}
+
+/** Every two-input mix of the advanced cauldron, by what it makes */
+function allAdvancedMixes(): Map<string, Variant[]> {
+    const byOutput = new Map<string, Variant[]>();
+    const n = candidates.length;
+    for (let a = 0; a < n; a++)
+        for (let b = a; b < n; b++) {
+            const picks = [candidates[a], candidates[b]];
+            const out = advancedCauldronOutput(picks[0].id, picks[1].id);
+            if (!out || picks.some((p) => p.id === out)) continue;
+            const distinct = [...new Map(picks.map((p) => [p.id, p])).values()];
+            const variant: Variant = {
+                picks,
+                steps: 1 + distinct.reduce((sum, p) => sum + p.steps, 0),
+                distinct: distinct.length,
+                off: 0,
+                price: picks.reduce((sum, p) => sum + p.price, 0),
+                bought: picks.some((p) => p.bought),
+            };
+            const list = byOutput.get(out);
+            if (list) list.push(variant);
+            else byOutput.set(out, [variant]);
+        }
+    return byOutput;
+}
+
+let advancedMixes: Map<string, Variant[]> | null = null;
+
+/** Advanced cauldron recipes, picked like the cauldron's (see cauldronRecipesFor) */
+export function advancedCauldronRecipesFor(options: CauldronOptions): CauldronRecipe[] {
+    advancedMixes ??= allAdvancedMixes();
+    const result: CauldronRecipe[] = [];
+    for (const [out, variants] of advancedMixes) {
+        const usual = productionSteps(out);
+        const allowed = variants.filter((v) => v.steps < usual && (options.buyInputs || !v.bought));
+        if (allowed.length === 0) continue;
+        const plantShare = (v: Variant) => v.picks.filter((p) => PLANTS.has(p.id)).length;
+        const twoKinds = allowed.filter((v) => v.distinct === 2).sort((a, b) => plantShare(b) - plantShare(a) || bySimplicity(a, b));
+        const picked = new Set([...[...allowed].sort(bySimplicity).slice(0, PER_KIND), ...[...allowed].sort(byPrice).slice(0, PER_KIND), ...twoKinds.slice(0, PER_KIND)]);
+        picked.forEach((v) => result.push(toRecipe(out, v, "advanced-cauldron")));
+    }
+    return result;
+}
+
 let everything: Map<string, CauldronRecipe> | null = null;
-/** Any cauldron recipe the planner may have used, by id */
+/** Any cauldron recipe (either cauldron) the planner may have used, by id */
 export function cauldronRecipeById(id: string): CauldronRecipe | undefined {
-    if (!id.startsWith("cauldron-")) return undefined;
-    everything ??= new Map([...cauldronRecipesFor({ buyInputs: true }), ...cauldronRecipesFor({ buyInputs: false })].map((r) => [r.id, r]));
+    if (!id.startsWith("cauldron-") && !id.startsWith(`${ADVANCED_PREFIX}-`)) return undefined;
+    everything ??= new Map(
+        [true, false].flatMap((buyInputs) => [...cauldronRecipesFor({ buyInputs }), ...advancedCauldronRecipesFor({ buyInputs })]).map((r) => [r.id, r]),
+    );
     return everything.get(id);
 }
