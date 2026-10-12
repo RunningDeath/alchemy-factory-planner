@@ -1308,14 +1308,17 @@ function layOut(
             const info = blocks[m.index].info;
             const x0 = m.dx + corridor;
             const y0 = m.dy + corridor;
+            // The block's size in the tower (it may have been turned to fit on top)
+            const w = m.turned ? info.depth : info.width;
+            const d = m.turned ? info.width : info.depth;
             tiers[m.index] = {
                 ...info,
-                x: turned ? towerDepth - (y0 + info.depth) + pos.x : x0 + pos.x,
+                x: turned ? towerDepth - (y0 + d) + pos.x : x0 + pos.x,
                 y: turned ? x0 + pos.y : y0 + pos.y,
                 z: info.z + m.dz,
-                width: turned ? info.depth : info.width,
-                depth: turned ? info.width : info.depth,
-                turned,
+                width: turned ? d : w,
+                depth: turned ? w : d,
+                turned: turned !== !!m.turned,
             };
         }
     });
@@ -1431,15 +1434,21 @@ function moduleGroupsOf(steps: ModuleStep[], groups: string[][] | undefined): St
 
 /**
  * How the modules are arranged, tried in this order until every belt routes:
+ * - column: one behind the other in production order, like the steps of a line: each
+ *   module's back faces the next one's front, with free rows between (a few, plus some
+ *   per belt coming in);
  * - row: side by side, fronts in line, with free cells between two modules (a few, plus
  *   some per belt coming in from another module);
  * - near / flow: like blocks in one module (see layOut), each module behind the modules
  *   feeding it, so their outputs run straight into its inputs, with `corridor` free cells
  *   around each module.
  */
-type ModuleArrangement = { mode: "row"; perBelt: number } | { mode: "near" | "flow"; corridor: number };
+type ModuleArrangement = { mode: "row" | "column"; perBelt: number } | { mode: "near" | "flow"; corridor: number };
 const MODULE_GAP = 2;
+/** Widest a module of a grouped layout may get (one wooden floor) */
+const MODULE_MAX_WIDTH = 16;
 const MODULE_ARRANGEMENTS: ModuleArrangement[] = [
+    { mode: "column", perBelt: 1 },
     { mode: "row", perBelt: 1 },
     { mode: "near", corridor: 2 },
     { mode: "flow", corridor: 2 },
@@ -1464,6 +1473,8 @@ function generateGrouped(allSteps: ModuleStep[], groups: StepGroup[], options: M
         const sent = group.steps.flatMap((st) => st.outputs.map((o) => o.itemName)).filter((item) => usedElsewhere.has(item));
         const opts: ModuleOptions = {
             ...options,
+            // Narrow modules: they grow up into towers instead of out
+            maxWidth: Math.min(options.maxWidth, MODULE_MAX_WIDTH),
             moduleGroups: undefined,
             stackBlocks: group.tower || options.stackBlocks,
             exportItems: [...new Set([...(options.exportItems ?? []), ...sent])],
@@ -1503,6 +1514,27 @@ type Box = ReturnType<typeof cellBounds>;
 /** Where each module's front left corner goes */
 function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArrangement, maxWidth: number): { x: number; y: number }[] {
     const sizes = boxes.map((b) => ({ width: b.maxX - b.minX + 1, depth: b.maxY - b.minY + 1 }));
+    if (arrangement.mode === "column") {
+        // Suppliers first, so belts run from one module's back into the next one's front
+        const sequence: number[] = [];
+        const placed = new Set<number>();
+        while (sequence.length < sizes.length) {
+            const ready = sizes.map((_, j) => j).find((j) => !placed.has(j) && feeds.every((row, i) => row[j] === 0 || placed.has(i) || i === j));
+            const next = ready ?? sizes.findIndex((_, j) => !placed.has(j));
+            sequence.push(next);
+            placed.add(next);
+        }
+        // Centred on one line; belts into a module spread out in the rows in front of it
+        const widest = Math.max(...sizes.map((s) => s.width));
+        const positions = new Array<{ x: number; y: number }>(sizes.length);
+        let y = 0;
+        sequence.forEach((j, pos) => {
+            if (pos > 0) y += MODULE_GAP + feeds.reduce((sum, row) => sum + row[j], 0) * arrangement.perBelt;
+            positions[j] = { x: Math.floor((widest - sizes[j].width) / 2), y };
+            y += sizes[j].depth;
+        });
+        return positions;
+    }
     if (arrangement.mode === "row") {
         // Belts into a module come up the gaps beside it: each gap gets those from its side
         let x = 0;
@@ -1517,7 +1549,7 @@ function arrangeModules(boxes: Box[], feeds: number[][], arrangement: ModuleArra
             return at;
         });
     }
-    const c = arrangement.corridor;
+    const c = arrangement.mode === "near" || arrangement.mode === "flow" ? arrangement.corridor : 0;
     const feeders = feeds.map((_, j) => feeds.map((row, i) => (row[j] > 0 ? i : -1)).filter((i) => i >= 0));
     const stageMemo = new Map<number, number>();
     const stageOf = (j: number, seen = new Set<number>()): number => {

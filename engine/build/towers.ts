@@ -5,6 +5,7 @@
  * load, or the ground); lab stands let lane belts underneath keep running.
  */
 import { cellKey, cellsCollide, placementCells, type Placement } from "./layout";
+import { transformBlock } from "./packing";
 import { findLaneEnds } from "./router";
 import { addToOccupancy, isSupported, supportColumn, type Occupancy } from "./supports";
 
@@ -15,6 +16,8 @@ export interface TowerMember {
     dx: number;
     dy: number;
     dz: number;
+    /** Turned a quarter before mounting (lanes run along x instead of y) */
+    turned?: boolean;
 }
 
 export interface Tower {
@@ -219,12 +222,17 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
     const order = blocks.map((_, i) => i).sort((a, b) => blocks[a].width * blocks[a].depth - blocks[b].width * blocks[b].depth);
 
     for (const i of order) {
-        const upper = blocks[i];
         const own = towers[i];
-        if (!upper.canGoUp || !own || own.members.length > 1) continue;
-        const area = upper.width * upper.depth;
-        let best: { t: number; dx: number; dy: number; score: number; fit: NonNullable<ReturnType<typeof mount>> } | null = null;
+        if (!blocks[i].canGoUp || !own || own.members.length > 1) continue;
+        const area = blocks[i].width * blocks[i].depth;
+        let best: { t: number; dx: number; dy: number; score: number; fit: NonNullable<ReturnType<typeof mount>>; upper: TowerBlock; turned: boolean } | null = null;
+        // As built and turned a quarter: a turned block often fits where the other doesn't
+        const variants = [
+            { upper: blocks[i], turned: false },
+            { upper: { ...blocks[i], placements: transformBlock(blocks[i].placements, blocks[i].depth, 1, 0, 0), width: blocks[i].depth, depth: blocks[i].width }, turned: true },
+        ];
 
+        for (const { upper, turned } of variants)
         for (let t = 0; t < towers.length; t++) {
             const tower = towers[t];
             if (!tower || t === i || tower.members.some((m) => blocks[m.index].canCarry === false)) continue;
@@ -245,14 +253,14 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
                     const saved = tower.width * tower.depth + area - width * depth;
                     if (saved < area * MIN_SAVING) continue;
                     const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST;
-                    if (!best || score > best.score) best = { t, dx, dy, score, fit };
+                    if (!best || score > best.score) best = { t, dx, dy, score, fit, upper, turned };
                 }
         }
         if (!best) continue;
-        const { t, dx, dy, fit } = best;
+        const { t, dx, dy, fit, upper, turned } = best;
         const tower = towers[t]!;
         const all = [...tower.placements, ...fit.moved, ...fit.supports];
-        const members = [...tower.members, { index: i, dx, dy, dz: fit.dz }];
+        const members = [...tower.members, { index: i, dx, dy, dz: fit.dz, turned }];
         // Keep the tower's frame at 0,0
         const b = bounds(all);
         const ox = Math.min(0, b.minX), oy = Math.min(0, b.minY);
