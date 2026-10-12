@@ -167,7 +167,10 @@ export function BuildPlanner() {
             setSelectedUid(null);
         };
         // Final products always leave at the edge; surplus only if the player chose it
-        const request: GenerateRequest = { steps, options: { ...opts, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks } };
+        // Fertilizer and fuel the factory buys reach their machines from outside
+        const config = factory?.config;
+        const boughtItems = [config && !config.selfFertilizer ? config.selectedFertilizer : undefined, config && !config.selfFuel ? config.selectedFuel : undefined].filter((i): i is string => !!i);
+        const request: GenerateRequest = { steps, options: { ...opts, beltSpeed: report.beltSpeed, finalProducts: report.targets.map((t) => t.itemName), unlocks, boughtItems } };
         w.postMessage(request);
     };
 

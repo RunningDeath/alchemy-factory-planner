@@ -528,8 +528,8 @@ function linkProductionNodes(
         const fertilizerPerActivation = (outputCount * outputItem.required_nutrients) / fertilizerItem.nutrient_value;
         const fertilizerRate = activationRate * fertilizerPerActivation;
 
-        // Link fertilizer (production sources)
-        if (fertFlow && fertFlow.sources.length > 0) {
+        // Link fertilizer (production sources); bought fertilizer only comes from the purchase
+        if (ctx.selfFertilizer && fertFlow && fertFlow.sources.length > 0) {
           // Calculate how much comes from production vs raw (if raw is available)
           const rawFertRate = nodes.get(`${fertId}-raw`)?.rate || 0;
           const totalFertAvailable = fertFlow.produced + rawFertRate;

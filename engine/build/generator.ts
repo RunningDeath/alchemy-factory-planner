@@ -77,6 +77,8 @@ export interface ModuleOptions {
     finalProducts?: string[];
     /** Surplus the player sends out at the edge (the rest stays in the line; final products always leave) */
     exportItems?: string[];
+    /** Bought fertilizer/fuel: machines that use it get it from outside even when the module makes it as a product */
+    boughtItems?: string[];
     /** The player's level and unlocks; only those buildings are used. Absent: everything */
     unlocks?: BuildUnlocks;
     /** Put small blocks on top of others to save floor (default: yes) */
@@ -166,6 +168,8 @@ export interface GeneratedModule {
 
 /** Widest corridor tried for stacked towers before falling back to blocks side by side */
 const TOWER_MAX_CORRIDOR = 3;
+/** How often blocks whose belts fail leave the towers before everything goes side by side */
+const STACK_RETRIES = 4;
 /** After this long, stop trying more layouts once one routes everything */
 const TIME_BUDGET_MS = 60000;
 
@@ -1128,35 +1132,74 @@ export function generateModule(allSteps: ModuleStep[], options: ModuleOptions): 
     const leftovers = new Set(steps.flatMap((st) => (st.outputs.length >= 2 ? st.outputs.filter((o) => o.itemName !== st.itemName).map((o) => o.itemName) : [])));
     const singles: Tower[] = blocks.map((b, index) => ({ members: [{ index, dx: 0, dy: 0, dz: 0 }], placements: b.placements, width: b.info.width, depth: b.info.depth }));
     const related = (a: number, b: number) => flow[a].feeders.includes(b) || flow[b].feeders.includes(a);
-    const towers =
-        options.stackBlocks === false || !can.lifts
-            ? singles
-            : buildTowers(
-                  blocks.map((b) => ({ placements: b.placements, width: b.info.width, depth: b.info.depth, canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL, canCarry: b.info.deviceId !== PURCHASING_PORTAL })),
-                  { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
-              );
-    // Stacked towers first; side by side only when the towers can't be belted together
-    const layouts = towers.length < singles.length ? [towers, singles] : [singles];
-    // Stacked towers get the tight corridors only; when they don't route, side by side next
-    const attemptsFor = (set: Tower[]) => (set === towers && towers !== singles ? attempts.filter(([c]) => c <= TOWER_MAX_CORRIDOR) : attempts);
-    const total = layouts.reduce((sum, set) => sum + attemptsFor(set).length, 0);
+    const stackOn = options.stackBlocks !== false && can.lifts;
+    // Blocks kept out of towers: their belts couldn't be routed while stacked
+    const excluded = new Set<number>();
+    const makeTowers = () =>
+        buildTowers(
+            blocks.map((b, i) => ({
+                placements: b.placements,
+                width: b.info.width,
+                depth: b.info.depth,
+                canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && !excluded.has(i),
+                canCarry: b.info.deviceId !== PURCHASING_PORTAL && !excluded.has(i),
+            })),
+            { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
+        );
+    const blockIndex = new Map(blocks.map((b, i) => [`${b.info.itemName} (${b.info.machines}× ${getFootprint(b.info.deviceId)?.name ?? b.info.deviceId})`, i]));
+    let towers = stackOn ? makeTowers() : singles;
+    /** Blocks of failed belts whose two ends stand in the same tower */
+    const sameTowerFailures = (result: GeneratedModule, set: Tower[]) => {
+        const towerOf = new Map<number, number>();
+        set.forEach((t, ti) => t.members.forEach((m) => towerOf.set(m.index, ti)));
+        const out = new Set<number>();
+        for (const r of result.routes) {
+            if (r.ok) continue;
+            const [a, b] = [blockIndex.get(r.from), blockIndex.get(r.to)];
+            if (a !== undefined && b !== undefined && towerOf.get(a) === towerOf.get(b)) [a, b].forEach((i) => out.add(i));
+        }
+        return out;
+    };
+    const towerAttempts = attempts.filter(([c]) => c <= TOWER_MAX_CORRIDOR);
+    const total = (towers.length < singles.length ? towerAttempts.length * (STACK_RETRIES + 1) : 0) + attempts.length;
     const started = Date.now();
     let attempt = 0;
-    for (const set of layouts) {
+    let retries = 0;
+    // Stacked towers first. When some belts don't fit, only the blocks they belong to leave
+    // the towers and the rest tries again; side by side for everything as the last resort
+    for (;;) {
+        const stacked = towers.length < singles.length;
+        const set = stacked ? towers : singles;
         const setFlow = towerFlow(set, flow);
-        for (const [corridor, mode] of attemptsFor(set)) {
+        let bestOfSet: GeneratedModule | null = null;
+        for (const [corridor, mode] of stacked ? towerAttempts : attempts) {
             // Long enough: settle for the best layout that routes everything
             if (best?.routes.every((r) => r.ok) && Date.now() - started > TIME_BUDGET_MS) break;
-            const label = `Layout ${attempt + 1} of up to ${total}${set === towers && towers !== singles ? " (stacked)" : ""}: routing belts`;
+            const label = `Layout ${attempt + 1} of up to ${total}${stacked ? " (stacked)" : ""}: routing belts`;
             const base = attempt++;
-            const onProgress = options.onProgress && ((f: number) => options.onProgress!((base + f) / total, label));
+            const onProgress = options.onProgress && ((f: number) => options.onProgress!(Math.min(0.99, (base + f) / total), label));
             onProgress?.(0);
             const result = layOut(blocks, set, setFlow, corridor, mode, { ...options, onProgress }, can, leftovers);
+            if (!bestOfSet || score(result) < score(bestOfSet)) bestOfSet = result;
             if (!best || score(result) < score(best)) best = result;
+            // A belt between two blocks of the same tower fails whatever the layout around it:
+            // take those blocks out of the towers right away instead of trying every layout
+            if (stacked && retries < STACK_RETRIES && sameTowerFailures(result, set).size > 0) break;
             // All layouts of a corridor width get a chance before settling
             if (mode === "packed" && best.routes.every((r) => r.ok)) break;
         }
-        if (best?.routes.every((r) => r.ok)) break;
+        if (best?.routes.every((r) => r.ok) || !stacked) break;
+        const inTower = sameTowerFailures(bestOfSet!, set);
+        const failing =
+            inTower.size > 0
+                ? inTower
+                : new Set(bestOfSet!.routes.filter((r) => !r.ok).flatMap((r) => [blockIndex.get(r.from), blockIndex.get(r.to)]).filter((i): i is number => i !== undefined));
+        const fresh = [...failing].filter((i) => !excluded.has(i));
+        if (retries < STACK_RETRIES && fresh.length > 0) {
+            fresh.forEach((i) => excluded.add(i));
+            towers = makeTowers();
+            retries++;
+        } else towers = singles;
     }
     best!.locked = lockedBuildings(new Set(best!.placements.map((p) => p.id)), options.unlocks);
     options.onProgress?.(1, "Done");
@@ -1225,16 +1268,15 @@ function layOut(
     const positions: PackedItem[] = new Array(towers.length);
     const frontDepth = front.length ? Math.max(...front.map((i) => sizes[i].depth)) : 0;
     rest.forEach((i, k) => (positions[i] = { ...restPacked.positions[k], y: restPacked.positions[k].y + frontDepth }));
-    // Each portal as close as it gets to the blocks it feeds, left to right without overlap
+    // Portals side by side in one tight row, in the order of the blocks they feed
     const wantX = (i: number) => {
         const fed = rest.filter((j) => flow[j].feeders.includes(i));
         return fed.length ? Math.min(...fed.map((j) => positions[j].x)) : 0;
     };
     let cursor = 0;
     for (const i of [...front].sort((a, b) => wantX(a) - wantX(b))) {
-        const x = Math.max(cursor, wantX(i));
-        positions[i] = { x, y: 0, rot: 0 };
-        cursor = x + sizes[i].width;
+        positions[i] = { x: cursor, y: 0, rot: 0 };
+        cursor += sizes[i].width;
     }
     const packed = { positions };
     const blockPlacements: Placement[] = [];
@@ -1289,6 +1331,7 @@ function layOut(
               // (through any side); other surplus stays in the line (it only slows its machines)
               exportable: (item) => finals.has(item) || products.has(item) || chosen.has(item) || leftovers.has(item),
               sideExit: (item) => leftovers.has(item) && !finals.has(item) && !chosen.has(item),
+              bought: (item) => (options.boughtItems ?? []).includes(item),
           })
         : { placements: [], routes: [], io: [], surplus: [] };
     // Cheaper supports now that routing is done: wood blocks where no belt shares the cell,

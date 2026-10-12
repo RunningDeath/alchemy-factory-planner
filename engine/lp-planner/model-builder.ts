@@ -265,6 +265,8 @@ export function buildLPModel(
     targets.set(itemId, current + t.rate);
   });
 
+  const madeTargets = new Map<string, number>();
+
   // Create constraints for each item
   allItems.forEach((itemName) => {
     const isTarget = targets.has(itemName);
@@ -276,11 +278,14 @@ export function buildLPModel(
     const fuelId = normalizeItemId(ctx.selectedFuel);
     const fertilizerId = ctx.selectedFertilizer ? normalizeItemId(ctx.selectedFertilizer) : null;
 
-    if (!ctx.selfFuel && itemName === fuelId && !isTarget) {
+    const bought = (!ctx.selfFuel && itemName === fuelId) || (!ctx.selfFertilizer && !!fertilizerId && itemName === fertilizerId);
+    if (bought) {
       isRawMaterial = true;
     }
-    if (!ctx.selfFertilizer && fertilizerId && itemName === fertilizerId && !isTarget) {
-      isRawMaterial = true;
+    // A target that is also the bought fuel/fertilizer: what the machines burn or feed on is
+    // bought, the target itself is made here (its own constraint below)
+    if (bought && isTarget) {
+      madeTargets.set(itemName, targetRate);
     }
 
     // Create raw material variable if needed
@@ -295,9 +300,19 @@ export function buildLPModel(
     // net_flow = sum(recipe contributions) + raw_purchase - target
     // For targets: net_flow >= targetRate
     // For intermediates: net_flow >= 0 (can't consume more than produced)
-    const rhs = isTarget ? targetRate - availableRate : -availableRate;
+    const rhs = isTarget && !madeTargets.has(itemName) ? targetRate - availableRate : -availableRate;
 
     constraints.set(`item_${itemName}`, { min: rhs });
+  });
+
+  // Made targets: the recipes producing them must cover the target on their own
+  madeTargets.forEach((rate, itemName) => {
+    const key = `made:${itemName}`;
+    variables.forEach((coeffs, varName) => {
+      const produced = coeffs.get(itemName) ?? 0;
+      if (varName.startsWith("recipe_") && produced > 0) coeffs.set(key, produced);
+    });
+    constraints.set(`item_${key}`, { min: rate });
   });
 
   // Build objective: minimize cost of raw materials (plus machines, when weighted)

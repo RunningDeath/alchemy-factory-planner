@@ -69,6 +69,8 @@ export interface RouterOptions {
     bridges?: boolean;
     /** Items whose unused output leaves the module (the rest stays in the line); default: all */
     exportable?: (itemName: string) => boolean;
+    /** Items whose consumers import them although the module makes them (bought fertilizer/fuel that is also a target) */
+    bought?: (itemName: string) => boolean;
     /** Items that may also leave through the module's sides (leftovers for a sink), not only front and back */
     sideExit?: (itemName: string) => boolean;
     /** Conveyor lifts may change levels (default: yes) */
@@ -143,7 +145,16 @@ interface Connection {
  * `exportable`: items whose unused output leaves at the module edge (final products and
  * the surplus the player chose). Without it, all unused output is exported.
  */
-export function assignFlows(ends: LaneEnd[], exportable?: (itemName: string) => boolean, surplus?: { itemName: string; rate: number }[]): Connection[] {
+/**
+ * `bought`: items the module's machines get from outside although the module makes them
+ * too (a target that is also the bought fertilizer or fuel): consumers import, producers export.
+ */
+export function assignFlows(
+    ends: LaneEnd[],
+    exportable?: (itemName: string) => boolean,
+    surplus?: { itemName: string; rate: number }[],
+    bought?: (itemName: string) => boolean,
+): Connection[] {
     const items = new Set(ends.flatMap((e) => e.items.map((i) => i.itemName)));
     const connections: Connection[] = [];
     const byPosition = (a: LaneEnd, b: LaneEnd) => a.port[0] + a.port[1] * 0.01 - (b.port[0] + b.port[1] * 0.01);
@@ -154,6 +165,11 @@ export function assignFlows(ends: LaneEnd[], exportable?: (itemName: string) => 
         const consumers = ends.filter((e) => e.kind === "in" && rateOf(e) > 1e-6).sort(byPosition);
         const supply = producers.map(rateOf);
         const demand = consumers.map(rateOf);
+        if (bought?.(itemName)) {
+            consumers.forEach((c, k) => connections.push({ itemName, rate: demand[k], from: "import", to: c }));
+            producers.forEach((p, k) => connections.push({ itemName, rate: supply[k], from: p, to: "export" }));
+            continue;
+        }
         // Rounded-up consumers could take more than the module makes: share what is made
         const totalSupply = supply.reduce((a, b) => a + b, 0);
         const totalDemand = demand.reduce((a, b) => a + b, 0);
@@ -624,7 +640,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     const entryFed = new Set<string>();
 
     const surplusList: { itemName: string; rate: number }[] = [];
-    const connections = assignFlows(ends, options.exportable, surplusList);
+    const connections = assignFlows(ends, options.exportable, surplusList, options.bought);
 
     // An exit that feeds consumers and also exports its surplus gets a priority splitter:
     // consumers first, only the overflow leaves at the edge (a plain split would halve them)
@@ -657,6 +673,7 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     };
     connections.sort((a, b) => rank(a) - rank(b) || distance(a) - distance(b));
 
+    let allowNewExit = false;
     for (const [done, conn] of connections.entries()) {
         options.onProgress?.(done / connections.length);
         const sourceId = conn.from === "import" ? `import:${conn.itemName}` : conn.from.uid;
@@ -700,8 +717,17 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             // Leftovers for a sink may leave through the sides too; everything else front or back
             const sides = options.sideExit?.(conn.itemName) ?? false;
             estimate = (c) => (sides ? Math.min(c[0] - minX, maxX - c[0], maxY - c[1]) : maxY - c[1]) + c[2];
+            // One belt out per item: join the item's export belt while it has room, a new exit only otherwise
+            const joinable = exportTrees.some((n) => (treeTotals.get(n.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6);
             goal = (cell, heading) => {
                 const nextCell = add(cell, heading);
+                if (joinable && !allowNewExit) {
+                    const m = nodes.get(keyOf(nextCell));
+                    if (m && exportTrees.includes(m) && (treeTotals.get(m.tree!) ?? 0) + conn.rate <= options.beltSpeed + 1e-6 && canAdd(m, oppositeSide(heading), "in")) {
+                        return { kind: "merge", node: m, side: oppositeSide(heading) };
+                    }
+                    return null;
+                }
                 if (onEdge(cell) && nextCell[1] > maxY) return { kind: "edge" };
                 if (sides && cell[2] === 0 && (nextCell[0] < minX || nextCell[0] > maxX) && (cell[0] === minX || cell[0] === maxX)) return { kind: "edge" };
                 const m = nodes.get(keyOf(nextCell));
@@ -732,7 +758,13 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             ? [...nodes.values()].filter((n) => n.tree === `export:${conn.itemName}`).map((n) => n.cell[2])
             : [conn.to.port[2], ...[...nodes.values()].filter((n) => conn.to !== "export" && n.sinks.has(conn.to.uid)).map((n) => n.cell[2])];
         const levels = [...new Set([0, 1, ...starts.map((st) => st.cell[2]), ...goalZs])].filter((z) => liftLevels.includes(z) || z <= 1).sort((a, b) => a - b);
-        const found = search(starts, goal, estimate, levels);
+        let found = search(starts, goal, estimate, levels);
+        // Couldn't reach the item's export belt: a second exit after all
+        if (!found && conn.to === "export" && !allowNewExit) {
+            allowNewExit = true;
+            found = search(starts, goal, estimate, levels);
+        }
+        allowNewExit = false;
         let ok = false;
         if (found) {
             const startNode = (() => {

@@ -72,8 +72,19 @@ function cauldronHeating(info: NodeBeltInfo, fuel?: string): ModuleStep["heating
     return { kind: heatingKind(fuelItem), fuelItem, fuelRate: heatValue > 0 ? heatPerMinute / heatValue : 0 };
 }
 
-const flows = (list: NodeBeltInfo["perMachineInputs"], fluid: boolean) =>
-    list.filter((f) => f.isFluid === fluid).map((f) => ({ itemName: f.itemName, perMachineRate: f.perMachineRate }));
+const flows = (list: NodeBeltInfo["perMachineInputs"], fluid: boolean, load = 1) =>
+    list.filter((f) => f.isFluid === fluid).map((f) => ({ itemName: f.itemName, perMachineRate: f.perMachineRate * load }));
+
+/**
+ * How busy the machines really are: what the built factory makes (inputs and consumers
+ * limit it) over what the machines could make at full speed. Belts carry the real flow,
+ * so a rounded-up machine whose consumer can't take more doesn't show as surplus.
+ */
+function loadOf(info: NodeBeltInfo): number {
+    const full = (info.perMachineOutputs.find((f) => f.itemName === info.itemName) ?? info.perMachineOutputs[0])?.perMachineRate ?? 0;
+    const capacity = full * machinesFor(info);
+    return capacity > 0 ? Math.min(1, info.realizedRate / capacity) : 1;
+}
 
 /** `fuel`: the plan's selected fuel, for heated steps that also use it as an ingredient */
 export function stepsFromReport(report: BeltReport, fuel?: string): ModuleStep[] {
@@ -85,10 +96,10 @@ export function stepsFromReport(report: BeltReport, fuel?: string): ModuleStep[]
             itemName: info.itemName,
             deviceId: info.deviceId!,
             machines: machinesFor(info),
-            inputs: flows(info.perMachineInputs, false),
-            outputs: flows(info.perMachineOutputs, false),
+            inputs: flows(info.perMachineInputs, false, loadOf(info)),
+            outputs: flows(info.perMachineOutputs, false, loadOf(info)),
             fluidInputs: info.perMachineInputs.filter((f) => f.isFluid).map((f) => f.itemName),
-            fluids: { inputs: flows(info.perMachineInputs, true), outputs: flows(info.perMachineOutputs, true) },
+            fluids: { inputs: flows(info.perMachineInputs, true, loadOf(info)), outputs: flows(info.perMachineOutputs, true, loadOf(info)) },
             heating: heatingFor(report, info, fuel),
         }));
 }
