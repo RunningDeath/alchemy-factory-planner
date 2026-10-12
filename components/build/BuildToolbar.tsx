@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronUp, Download, FlipHorizontal2, Redo2, RotateCw, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { useState } from "react";
 import type { ModuleOptions } from "../../engine/build/generator";
 import type { BuildUnlocks } from "../../engine/build/unlocks";
 import { buildingName } from "../../lib/buildCatalog";
@@ -45,17 +46,27 @@ const buttonClass =
     "px-2 py-1.5 rounded-md flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold-dim)] disabled:opacity-40 disabled:cursor-not-allowed";
 
 function NumberField({ label, value, min, max, onChange, title }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void; title: string }) {
+    // Typed freely; the value is checked and applied on Enter or when leaving the field
+    const [draft, setDraft] = useState<string | null>(null);
+    const commit = () => {
+        if (draft === null) return;
+        const v = Number(draft);
+        if (draft.trim() !== "" && Number.isFinite(v)) onChange(Math.min(max, Math.max(min, Math.round(v))));
+        setDraft(null);
+    };
     return (
-        <label className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]" title={title}>
+        <label className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]" title={`${title} (${min}–${max})`}>
             {label}
             <input
                 type="number"
                 min={min}
                 max={max}
-                value={value}
-                onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, Math.round(v))));
+                value={draft ?? value}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") commit();
+                    if (e.key === "Escape") setDraft(null);
                 }}
                 className="w-12 bg-[var(--background)] border border-[var(--border)] rounded px-1 py-0.5 text-[var(--text-primary)] font-mono text-xs"
             />

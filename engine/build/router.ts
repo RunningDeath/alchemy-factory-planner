@@ -15,7 +15,7 @@
  */
 import { beltPieceFor } from "./belt-pieces";
 import { oppositeSide, rotateSide, SIDES, SIDE_OFFSET, type Rotation } from "./footprint";
-import { cellKey, cellsCollide, placementCells, portConnections, portTarget, type Placement } from "./layout";
+import { cellKey, cellsCollide, placementCells, placementPorts, portConnections, portTarget, type Placement } from "./layout";
 import { addToOccupancy, supportColumn, supportCost, type Occupancy } from "./supports";
 import type { Side } from "./types";
 
@@ -144,6 +144,8 @@ interface Connection {
     to: LaneEnd | "export";
     /** Export of what is left over past an export cap: ends in a sink next to the module */
     dispose?: boolean;
+    /** Surplus belted to a consumer that won't take it all: doesn't count against the belt's room */
+    surplus?: boolean;
 }
 
 /** Match producers to consumers per item; the rest is imported or exported */
@@ -198,6 +200,9 @@ export function assignFlows(
         for (; i < producers.length; i++) {
             if (supply[i] <= 1e-6) continue;
             if (exportable && !exportable(itemName)) {
+                // Surplus that stays: belt it to a consumer anyway (what it doesn't take backs
+                // up there), so no lane end is left open
+                if (consumers.length) connections.push({ itemName, rate: supply[i], from: producers[i], to: consumers[consumers.length - 1], surplus: true });
                 surplus?.push({ itemName, rate: supply[i] });
                 continue;
             }
@@ -323,7 +328,39 @@ export function routeModule(placements: Placement[], options: RouterOptions): Ro
         if (failed(best).length === 0) break;
         priority = [...new Set([...failed(result).map((r) => r.key!), ...priority])];
     }
+    best!.placements = trimDeadEnds(best!.placements, best!.io);
     return best!;
+}
+
+/**
+ * Routed belts whose output leads nowhere (not into a belt, machine or the module edge):
+ * a dead-end piece goes, a split loses the side that leads nowhere. Repeats until none is left.
+ */
+export function trimDeadEnds(placements: Placement[], io: IoPoint[]): Placement[] {
+    const edge = new Set(io.map((p) => keyOf(p.cell)));
+    let current = placements;
+    for (let round = 0; round < 50; round++) {
+        const routed = new Map(current.filter((p) => p.lane === "route" && p.id.startsWith("belt")).map((p) => [p.uid, p]));
+        const dead = new Map<string, Side[]>();
+        for (const s of portConnections(current)) {
+            const p = routed.get(s.port.uid);
+            if (!p || s.connectedTo || s.port.dir !== "out" || edge.has(keyOf([s.port.x, s.port.y, s.port.z]))) continue;
+            if (s.port.face === "top" || s.port.face === "base") continue;
+            dead.set(p.uid, [...(dead.get(p.uid) ?? []), s.port.face]);
+        }
+        if (dead.size === 0) return current;
+        current = current.flatMap((p) => {
+            const gone = dead.get(p.uid);
+            if (!gone) return [p];
+            const ports = placementPorts(p);
+            const ins = ports.filter((q) => q.dir === "in").map((q) => q.face as Side);
+            const outs = ports.filter((q) => q.dir === "out").map((q) => q.face as Side).filter((f) => !gone.includes(f));
+            if (outs.length === 0) return [];
+            const piece = beltPieceFor(ins, outs);
+            return piece ? [{ ...p, id: piece.id, rot: piece.rot }] : [p];
+        });
+    }
+    return current;
 }
 
 function routeOnce(placements: Placement[], options: RouterOptions, priority: string[]): RoutingOutput {
@@ -823,7 +860,8 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
             const connected = e.kind === "in" ? entryFed.has(e.uid) : exitUsed.has(e.uid);
             if (!connected) reserveEnd(e);
         }
-        routes.push({ itemName: conn.itemName, from: endName(conn.from), to: endName(conn.to), rate: conn.rate, ok, key: connKey(conn) });
+        // Surplus that finds no way to a consumer just stays where it is (it was optional)
+        if (ok || !conn.surplus) routes.push({ itemName: conn.itemName, from: endName(conn.from), to: endName(conn.to), rate: conn.rate, ok, key: connKey(conn) });
     }
 
     // Merge surplus per item

@@ -1062,6 +1062,11 @@ function buildCauldronTier(step: ModuleStep, count: number, fp: BuildingFootprin
 }
 
 
+/** Machines with pipe ports (fluids in or out) */
+function hasPipes(deviceId: string): boolean {
+    return getFootprint(deviceId)?.ports.some((p) => p.medium === "pipe") ?? false;
+}
+
 /** Fuel that a stone stove burns when steam heating pads aren't unlocked */
 const STOVE_FALLBACK_FUEL = "Coal";
 
@@ -1189,7 +1194,9 @@ function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs
                 placements: b.placements,
                 width: b.info.width,
                 depth: b.info.depth,
-                canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && !excluded.has(i),
+                // Heated blocks need their heater, portals stay in the front row, and machines
+                // with pipes (extractors, blenders) stay on the floor where pipes are easy
+                canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && !hasPipes(b.info.deviceId) && !excluded.has(i),
                 canCarry: b.info.deviceId !== PURCHASING_PORTAL && !excluded.has(i),
             })),
             { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
