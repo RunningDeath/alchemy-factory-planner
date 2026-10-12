@@ -69,7 +69,9 @@ export function pipeRisers(placements: Placement[], maxHeight: number, makeUid: 
         return true;
     };
     const { ports, blocked } = pipePorts(placements, columnFree);
-    const top = maxHeight - 1;
+    // The pipes join level with the module's top, not at the storey's ceiling
+    const highest = Math.max(0, ...[...occupancy.keys()].map((k) => Number(k.split(",")[2])));
+    const top = Math.min(maxHeight - 1, Math.max(highest, ...ports.map((p) => p.z)));
     const add = (x: number, y: number, z: number, resource: string, side?: Side | VerticalFace) => {
         const cell = cells.get(key(x, y, z)) ?? { resource, sides: new Set() };
         if (side) cell.sides.add(side);
