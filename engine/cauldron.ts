@@ -193,7 +193,10 @@ function toRecipe(out: string, v: Variant): CauldronRecipe {
     };
 }
 
-/** Variants offered per material: the simplest few and the cheapest few; the planner picks */
+/** What nurseries grow */
+const PLANTS = new Set(baseRecipes.filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? o.name)));
+
+/** Variants offered per material: the simplest few, the cheapest few and a few with three different inputs; the planner picks */
 const PER_KIND = 4;
 const bySimplicity = (a: Variant, b: Variant) => a.steps - b.steps || a.distinct - b.distinct || a.price - b.price || a.off - b.off;
 const byPrice = (a: Variant, b: Variant) => a.price - b.price || a.steps - b.steps || a.off - b.off;
@@ -209,7 +212,11 @@ export function cauldronRecipesFor(options: CauldronOptions): CauldronRecipe[] {
         const usual = productionSteps(out);
         const allowed = variants.filter((v) => v.steps < usual && (options.buyInputs || !v.bought));
         if (allowed.length === 0) continue;
-        const picked = new Set([...[...allowed].sort(bySimplicity).slice(0, PER_KIND), ...[...allowed].sort(byPrice).slice(0, PER_KIND)]);
+        // Also three different inputs, plants first: a slot with an item twice waits for the first
+        // one to fill up before the second gets any, which delays the start
+        const plantShare = (v: Variant) => v.picks.filter((p) => PLANTS.has(p.id)).length;
+        const threeKinds = allowed.filter((v) => v.distinct === 3).sort((a, b) => plantShare(b) - plantShare(a) || bySimplicity(a, b));
+        const picked = new Set([...[...allowed].sort(bySimplicity).slice(0, PER_KIND), ...[...allowed].sort(byPrice).slice(0, PER_KIND), ...threeKinds.slice(0, PER_KIND)]);
         picked.forEach((v) => result.push(toRecipe(out, v)));
     }
     return result;

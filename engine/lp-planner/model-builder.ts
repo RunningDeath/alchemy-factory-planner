@@ -11,6 +11,8 @@ import { cauldronRecipeById, cauldronRecipesFor } from "../cauldron";
 const PLANTS = new Set((recipesData as unknown as Recipe[]).filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? "")));
 /** Extra weight per cauldron input slot that isn't a plant, in cauldrons (machines) */
 const NON_PLANT_SLOT_COST = 4;
+/** Extra weight per cauldron slot taking an item another slot takes too */
+const SHARED_SLOT_COST = 4;
 
 // Pre-index data
 const itemsMap = new Map<string, Item>();
@@ -248,8 +250,11 @@ export function buildLPModel(
     if (ctx.machineWeight > 0) {
       const machines = recipeTime / (60 * ctx.speedMultiplier);
       // Cauldron mixes of plants are preferred: light, and a nursery is all they need
-      const heavySlots = recipe.crafted_in === "cauldron" ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
-      machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heavySlots * NON_PLANT_SLOT_COST));
+      const cauldron = recipe.crafted_in === "cauldron";
+      const heavySlots = cauldron ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
+      // An item in two slots: the first fills up completely before the second gets any (a slow start)
+      const sharedSlots = cauldron ? 3 - recipe.inputs.length : 0;
+      machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heavySlots * NON_PLANT_SLOT_COST + sharedSlots * SHARED_SLOT_COST));
     }
   });
 
