@@ -7,6 +7,11 @@ import { isAlchemyMachine } from "./efficiency";
 import { normalizeItemId, getItem as getItemById, getAllItems, getEffectiveRecipeTime } from "../item-utils";
 import { cauldronRecipeById, cauldronRecipesFor } from "../cauldron";
 
+/** What nurseries grow: cauldron inputs that need nothing but a nursery */
+const PLANTS = new Set((recipesData as unknown as Recipe[]).filter((r) => r.crafted_in === "nursery").flatMap((r) => r.outputs.map((o) => o.id ?? "")));
+/** Extra weight per cauldron input slot that isn't a plant, in cauldrons (machines) */
+const NON_PLANT_SLOT_COST = 4;
+
 // Pre-index data
 const itemsMap = new Map<string, Item>();
 const devicesMap = new Map<string, Device>();
@@ -240,7 +245,12 @@ export function buildLPModel(
 
     variables.set(recipeVar, recipeCoeffs);
     // Machines this recipe needs per run a minute: weighs complexity against raw cost
-    if (ctx.machineWeight > 0) machineCost.set(recipeVar, (ctx.machineWeight * recipeTime) / (60 * ctx.speedMultiplier));
+    if (ctx.machineWeight > 0) {
+      const machines = recipeTime / (60 * ctx.speedMultiplier);
+      // Cauldron mixes of plants are preferred: light, and a nursery is all they need
+      const heavySlots = recipe.crafted_in === "cauldron" ? recipe.inputs.reduce((n, i) => n + (PLANTS.has(i.id ?? "") ? 0 : i.count ?? 1), 0) : 0;
+      machineCost.set(recipeVar, ctx.machineWeight * machines * (1 + heavySlots * NON_PLANT_SLOT_COST));
+    }
   });
 
   // Build available resources lookup
