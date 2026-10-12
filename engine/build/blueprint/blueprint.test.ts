@@ -4,7 +4,7 @@ import { gunzipSync } from "node:zlib";
 import { beltPieceFor } from "../belt-pieces";
 import { getFootprint, type Rotation } from "../footprint";
 import { DEFAULT_MODULE_OPTIONS, generateModule } from "../generator";
-import { placementCells, validateLayout, type Placement } from "../layout";
+import { placementCells, portConnections, validateLayout, type Placement } from "../layout";
 import { beltActiveIndex, beltInputs, beltOutput, beltOutputs, beltPieceForBlueprint, beltRotationFor } from "./belts";
 import { bytesEqual, concatBytes } from "./bytes";
 import { buildingsOf, decodeBuilding, footprintForRow } from "./decode";
@@ -251,4 +251,29 @@ describe("machine settings", () => {
         expect(byName.get("AutoNursery")).toMatchObject({ recipe: "None", seed: "SageSeed" });
         expect(byName.get("Filter_Vert")).toMatchObject({ filter: "FlaxFiber" });
     });
+});
+
+describe("generated module round trip", () => {
+    test("belts into big machines keep their side outputs", () => {
+        const mod = generateModule(
+            [
+                {
+                    nodeKey: "salt-prod-salt_alt",
+                    itemName: "Salt",
+                    deviceId: "stone-crusher",
+                    machines: 4,
+                    inputs: [{ itemName: "Rock Salt", perMachineRate: 10 }],
+                    outputs: [{ itemName: "Salt", perMachineRate: 10 }],
+                    fluidInputs: [],
+                },
+            ],
+            { ...DEFAULT_MODULE_OPTIONS, beltSpeed: 165, finalProducts: ["Salt"], buyRaw: false },
+        );
+        const machines = new Set(["stone-crusher"]);
+        const open = (ps: Placement[]) =>
+            portConnections(ps).filter((s) => s.port.medium === "belt" && !s.connectedTo && machines.has(ps.find((p) => p.uid === s.port.uid)!.id)).length;
+        const back = blueprintToPlacements(placementsToBody(mod.placements).body).placements;
+        expect(open(mod.placements)).toBe(0);
+        expect(open(back)).toBe(0);
+    }, 30_000);
 });

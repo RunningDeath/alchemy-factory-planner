@@ -56,6 +56,8 @@ export interface DecodedLayout {
     placements: Placement[];
     /** Building rows without a footprint in the app */
     unknown: string[];
+    /** What machines are set to, by placement uid (internal game names) */
+    settings: Map<string, { recipe?: string; seed?: string; cauldronFilters?: string[] }>;
 }
 
 /**
@@ -65,6 +67,7 @@ export interface DecodedLayout {
 export function blueprintToPlacements(body: Property[]): DecodedLayout {
     const placements: Placement[] = [];
     const unknown: string[] = [];
+    const settings: DecodedLayout["settings"] = new Map();
     let n = 0;
     const add = (row: string, rot: Rotation, pivot: [number, number, number], base?: [number, number], extra?: Partial<Placement>) => {
         const fp = BY_ROW.get(row);
@@ -74,6 +77,7 @@ export function blueprintToPlacements(body: Property[]): DecodedLayout {
         }
         placements.push({ uid: `bp${n++}`, id: fp.id, rot, ...placementFromPivot(fp, rot, pivot, base), ...extra });
     };
+    const named = (v: string | undefined) => (v && v !== "None" ? v : undefined);
     for (const raw of buildingsOf(body)) {
         const b = decodeBuilding(raw);
         const filter = getProp<string>(raw, "FilterName");
@@ -88,7 +92,17 @@ export function blueprintToPlacements(body: Property[]): DecodedLayout {
         } else if (b.row === "Belt") {
             const piece = beltPieceForBlueprint(b.rot, getProp<number>(getProp<Property[]>(raw, "building"), "BaseActiveIndex"));
             add(getFootprint(piece.id)!.row, piece.rot, b.pivot, b.base);
-        } else add(b.row, b.rot, b.pivot, b.base, extra);
+        } else {
+            const before = n;
+            add(b.row, b.rot, b.pivot, b.base, extra);
+            if (n === before) continue;
+            const cauldron = raw.filter((p) => p.name === "CauldronFilterName").map((p) => named(p.value as string));
+            settings.set(`bp${n - 1}`, {
+                recipe: named(getProp<string>(raw, "RecipeName")),
+                seed: named(getProp<string>(raw, "SeedName")),
+                ...(cauldron.some(Boolean) && { cauldronFilters: cauldron.filter((c): c is string => !!c) }),
+            });
+        }
     }
-    return { placements, unknown };
+    return { placements, unknown, settings };
 }

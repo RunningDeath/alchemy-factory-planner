@@ -27,6 +27,9 @@ const config = (item: string, rate: number): PlannerConfig => ({
   selfFertilizer: false,
   selectedFuel: "Coal",
   selfFuel: false,
+  // Cheapest raw cost only: with fewer machines weighed in, Shattered Crystal skips the
+  // refined sand chain (crude shard straight from quartz ore), and that chain is under test here
+  machineWeight: 0,
 });
 
 function plan(item: string, rate: number) {

@@ -91,14 +91,17 @@ export function buildEfficiencyContext(config: PlannerConfig): EfficiencyContext
     selfFuel: config.selfFuel ?? true,
     selfFertilizer: config.selfFertilizer ?? true,
     useCauldron: config.useCauldron ?? false,
-    // With the cauldron the point is a simpler factory: fewer machines count for something
-    machineWeight: config.machineWeight ?? (config.useCauldron ? DEFAULT_MACHINE_WEIGHT : 0),
+    // Fewer machines always count for something (rock salt in a crusher beats a 150-machine
+    // quicklime chain to save coins); with the cauldron a simpler factory is the whole point
+    machineWeight: config.machineWeight ?? (config.useCauldron ? DEFAULT_MACHINE_WEIGHT : BASE_MACHINE_WEIGHT),
     cauldronBuyInputs: config.cauldronBuyInputs ?? false,
   };
 }
 
 /** Coins a machine is worth when weighing a simpler factory against raw material cost */
 export const DEFAULT_MACHINE_WEIGHT = 1000;
+/** Without the cauldron: enough to drop long chains that only save a little raw cost */
+export const BASE_MACHINE_WEIGHT = 300;
 
 /**
  * Check if a machine type gets the alchemy skill multiplier

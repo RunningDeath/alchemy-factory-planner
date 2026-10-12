@@ -88,11 +88,13 @@ function beltRecord(p: Placement, byCell: Map<string, Placement[]>): Record {
 
 /** Converts placements to blueprint buildings; lifts are grouped into one building each */
 function toRecords(placements: Placement[], warnings: string[]): Record[] {
+    // Every cell a building takes: a belt feeding a big machine meets it away from its origin
     const byCell = new Map<string, Placement[]>();
-    for (const p of placements) {
-        const key = cellKey(p.x, p.y, p.z);
-        byCell.set(key, [...(byCell.get(key) ?? []), p]);
-    }
+    for (const p of placements)
+        for (const c of placementCells(p)) {
+            const key = cellKey(c.x, c.y, c.z);
+            byCell.set(key, [...(byCell.get(key) ?? []), p]);
+        }
     const used = new Set<string>();
     const records: Record[] = [];
 
