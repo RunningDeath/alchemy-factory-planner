@@ -124,7 +124,7 @@ describe("generateModule", () => {
     expect(mod.tiers.reduce((s, t) => s + t.machines, 0)).toBe(40);
     expect(mod.tiers.every((t) => t.width <= 10 && t.depth <= 10)).toBe(true);
     expect(validateLayout(mod.placements)).toEqual([]);
-  });
+  }, 30000);
 });
 
 describe("stepsFromReport → generateModule", () => {

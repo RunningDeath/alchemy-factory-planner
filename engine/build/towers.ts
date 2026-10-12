@@ -36,6 +36,12 @@ export interface TowerBlock {
     canGoUp: boolean;
     /** Others may stand on it (purchasing portals stay free, in the front row) */
     canCarry?: boolean;
+    /** Score taken off for putting it up (machines that would rather stay on the floor) */
+    upCost?: number;
+    /** Only shares a tower with blocks of the same group (unset: the common pool) */
+    group?: string;
+    /** Machine kind: the same machines rather stack together (nurseries on nurseries) */
+    kind?: string;
 }
 
 interface TowerOptions {
@@ -52,6 +58,8 @@ const OVERHANG = 3;
 /** Score per support column cell (wood is cheap, but a forest of columns isn't) */
 const SUPPORT_COST = 0.1;
 const RELATED_BONUS = 6;
+/** Tower that already holds the same machines: consistent stacks, one kind of upkeep per tower */
+const SAME_KIND_BONUS = 5;
 /** Per level up: high blocks mean long lifts and belts on tall columns */
 const HEIGHT_COST = 0.5;
 
@@ -229,24 +237,36 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
     }));
     const order = blocks.map((_, i) => i).sort((a, b) => blocks[a].width * blocks[a].depth - blocks[b].width * blocks[b].depth);
 
+    // First the same machines among themselves (nurseries on nurseries, a consistent stack on
+    // the floor), then whatever fits anywhere
+    type Candidate = { t: number; dx: number; dy: number; score: number; fit: NonNullable<ReturnType<typeof mount>>; upper: TowerBlock; turned: boolean };
+    // Best spot per block on each tower, until that tower changes: the second pass reuses the first's
+    const version = towers.map(() => 0);
+    const memo = new Map<string, Candidate | null>();
+    for (const sameOnly of [true, false])
     for (const i of order) {
         const own = towers[i];
         if (!blocks[i].canGoUp || !own || own.members.length > 1) continue;
         const area = blocks[i].width * blocks[i].depth;
-        let best: { t: number; dx: number; dy: number; score: number; fit: NonNullable<ReturnType<typeof mount>>; upper: TowerBlock; turned: boolean } | null = null;
+        let best: Candidate | null = null;
         // As built and turned a quarter: a turned block often fits where the other doesn't
         const variants = [
             { upper: blocks[i], turned: false },
             { upper: { ...blocks[i], placements: transformBlock(blocks[i].placements, blocks[i].depth, 1, 0, 0), width: blocks[i].depth, depth: blocks[i].width }, turned: true },
         ];
 
-        for (const { upper, turned } of variants)
         for (let t = 0; t < towers.length; t++) {
             const tower = towers[t];
-            if (!tower || t === i || tower.members.some((m) => blocks[m.index].canCarry === false)) continue;
+            if (!tower || t === i || tower.members.some((m) => blocks[m.index].canCarry === false || blocks[m.index].group !== blocks[i].group)) continue;
+            if (sameOnly && !tower.members.every((m) => blocks[m.index].kind === blocks[i].kind)) continue;
+            const key = `${t}|${version[t]}|${i}`;
+            if (!memo.has(key)) {
+            let towerBest: Candidate | null = null;
+            for (const { upper, turned } of variants) {
             const top = topMap(tower.placements);
             const blockedBefore = blockedEnds([...tower.placements, ...upper.placements.map((p) => ({ ...p, x: p.x + 10000 }))]);
             const related = tower.members.some((m) => opts.related(m.index, i));
+            const sameKind = !!blocks[i].kind && tower.members.some((m) => blocks[m.index].kind === blocks[i].kind);
             // Up to a few cells past the edge, so the upper block's lane ends can reach down
             const xs = [Math.min(0, tower.width - upper.width) - OVERHANG, Math.max(0, tower.width - upper.width) + OVERHANG];
             const ys = [Math.min(0, tower.depth - upper.depth) - OVERHANG, Math.max(0, tower.depth - upper.depth) + OVERHANG];
@@ -260,9 +280,14 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
                     const depth = Math.max(tower.depth, dy + upper.depth, reach.maxY + 1) - Math.min(0, dy, reach.minY);
                     const saved = tower.width * tower.depth + area - width * depth;
                     if (saved < area * MIN_SAVING) continue;
-                    const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) - fit.dz * HEIGHT_COST;
-                    if (!best || score > best.score) best = { t, dx, dy, score, fit, upper, turned };
+                    const score = saved - fit.supports.length * SUPPORT_COST + (related ? RELATED_BONUS : 0) + (sameKind ? SAME_KIND_BONUS : 0) - fit.dz * HEIGHT_COST - (blocks[i].upCost ?? 0);
+                    if (!towerBest || score > towerBest.score) towerBest = { t, dx, dy, score, fit, upper, turned };
                 }
+            }
+            memo.set(key, towerBest);
+            }
+            const candidate = memo.get(key);
+            if (candidate && (!best || candidate.score > best.score)) best = candidate;
         }
         if (!best) continue;
         const { t, dx, dy, fit, upper, turned } = best;
@@ -280,6 +305,7 @@ export function buildTowers(blocks: TowerBlock[], opts: TowerOptions): Tower[] {
             depth: Math.max(tower.depth, dy + upper.depth, b.maxY + 1) - oy,
         };
         towers[i] = null;
+        version[t]++;
     }
     return towers.filter((t): t is Tower => t !== null);
 }

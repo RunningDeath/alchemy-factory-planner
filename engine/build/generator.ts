@@ -179,6 +179,10 @@ export interface GeneratedModule {
 const TOWER_MAX_CORRIDOR = 3;
 /** How often blocks whose belts fail leave the towers before everything goes side by side */
 const STACK_RETRIES = 4;
+/** Tower score off for putting a machine with pipes up (fine, but the floor is easier to pipe) */
+const PIPE_UP_COST = 4;
+/** Same machines follow one moved down when the towers then need at most this much more floor */
+const PEER_FLOOR_SLACK = 1.1;
 /** After this long, stop trying more layouts once one routes everything */
 const TIME_BUDGET_MS = 60000;
 
@@ -1186,18 +1190,22 @@ function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs
     const singles: Tower[] = blocks.map((b, index) => ({ members: [{ index, dx: 0, dy: 0, dz: 0 }], placements: b.placements, width: b.info.width, depth: b.info.depth }));
     const related = (a: number, b: number) => flow[a].feeders.includes(b) || flow[b].feeders.includes(a);
     const stackOn = options.stackBlocks !== false && can.lifts;
-    // Blocks kept out of towers: their belts couldn't be routed while stacked
-    const excluded = new Set<number>();
-    const makeTowers = () =>
+    // Blocks kept out of the common towers: their belts couldn't be routed while stacked.
+    // They may still stack among blocks of their own machine ("own"), then stand alone
+    let excluded = new Map<number, "own" | "alone">();
+    const makeTowers = (ex = excluded) =>
         buildTowers(
             blocks.map((b, i) => ({
                 placements: b.placements,
                 width: b.info.width,
                 depth: b.info.depth,
-                // Heated blocks need their heater, portals stay in the front row, and machines
-                // with pipes (extractors, blenders) stay on the floor where pipes are easy
-                canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && !hasPipes(b.info.deviceId) && !excluded.has(i),
-                canCarry: b.info.deviceId !== PURCHASING_PORTAL && !excluded.has(i),
+                // Heated blocks need their heater and portals stay in the front row; machines
+                // with pipes (extractors, blenders) rather stay on the floor where pipes are easy
+                canGoUp: !b.info.heating && b.info.deviceId !== PURCHASING_PORTAL && ex.get(i) !== "alone",
+                canCarry: b.info.deviceId !== PURCHASING_PORTAL && ex.get(i) !== "alone",
+                upCost: hasPipes(b.info.deviceId) ? PIPE_UP_COST : 0,
+                group: ex.get(i) === "own" ? `own:${b.info.deviceId}` : undefined,
+                kind: b.info.deviceId,
             })),
             { maxHeight: options.maxHeight, related, makeUid: () => nextUid("t") },
         );
@@ -1249,10 +1257,24 @@ function generateBlocks(allSteps: ModuleStep[], options: ModuleOptions, budgetMs
             inTower.size > 0
                 ? inTower
                 : new Set(bestOfSet!.routes.filter((r) => !r.ok).flatMap((r) => [blockIndex.get(r.from), blockIndex.get(r.to)]).filter((i): i is number => i !== undefined));
-        const fresh = [...failing].filter((i) => !excluded.has(i));
+        const fresh = [...failing].filter((i) => excluded.get(i) !== "alone");
         if (retries < STACK_RETRIES && fresh.length > 0) {
-            fresh.forEach((i) => excluded.add(i));
-            towers = makeTowers();
+            const next = new Map(excluded);
+            fresh.forEach((i) => next.set(i, next.has(i) ? "alone" : "own"));
+            // A block moved down takes the same machines that stand up elsewhere along, so
+            // they stack together (nurseries on nurseries), unless that costs much more floor
+            const up = new Set(set.flatMap((t) => t.members.filter((m) => m.dz > 0).map((m) => m.index)));
+            const peers = new Map(next);
+            for (const i of fresh.filter((i) => up.has(i)))
+                blocks.forEach((b, j) => {
+                    if (!peers.has(j) && up.has(j) && b.info.deviceId === blocks[i].info.deviceId) peers.set(j, "own");
+                });
+            const plain = makeTowers(next);
+            const floor = (ts: Tower[]) => ts.reduce((sum, t) => sum + t.width * t.depth, 0);
+            const withPeers = peers.size > next.size ? makeTowers(peers) : null;
+            const usePeers = withPeers && floor(withPeers) <= floor(plain) * PEER_FLOOR_SLACK;
+            excluded = usePeers ? peers : next;
+            towers = usePeers ? withPeers : plain;
             retries++;
         } else towers = singles;
     }
@@ -1336,6 +1358,7 @@ function layOut(
         positions[i] = { x: cursor - (cursor > 0 ? corridor : 0), y: 0, rot: 0 };
         cursor += cursor > 0 ? portalWidth(i) : sizes[i].width - corridor + 1;
     }
+    slideTowardFront(positions, sizes, rest);
     const packed = { positions };
     const blockPlacements: Placement[] = [];
     const tiers: TierInfo[] = new Array(blocks.length);
@@ -1364,6 +1387,38 @@ function layOut(
         }
     });
     return routeAndFinish(blockPlacements, tiers, [], options, can, leftovers, finish, ROUTING_MARGIN);
+}
+
+/**
+ * Moves blocks forward (to smaller y), then left, while nothing is in the way: fills the
+ * floor beside the portal row and gaps the packers leave. Positions with turned blocks
+ * keep their turned size; only the `movable` ones move, the rest stand where they are.
+ */
+function slideTowardFront(positions: PackedItem[], sizes: { width: number; depth: number }[], movable: number[]) {
+    const rect = (i: number, at = positions[i]) => {
+        const [w, d] = at.rot ? [sizes[i].depth, sizes[i].width] : [sizes[i].width, sizes[i].depth];
+        return { x: at.x, y: at.y, w, d };
+    };
+    const free = (i: number, at: PackedItem) => {
+        const a = rect(i, at);
+        if (a.x < 0 || a.y < 0) return false;
+        return positions.every((_, j) => {
+            if (j === i || !positions[j]) return true;
+            const b = rect(j);
+            return a.x >= b.x + b.w || b.x >= a.x + a.w || a.y >= b.y + b.d || b.y >= a.y + a.d;
+        });
+    };
+    for (let pass = 0; pass < 3; pass++)
+        for (const axis of ["y", "x"] as const)
+            for (const i of [...movable].sort((a, b) => positions[a][axis] - positions[b][axis])) {
+                let at = positions[i];
+                for (;;) {
+                    const next = { ...at, [axis]: at[axis] - 1 };
+                    if (!free(i, next)) break;
+                    at = next;
+                }
+                positions[i] = at;
+            }
 }
 
 /**
