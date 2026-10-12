@@ -1284,6 +1284,8 @@ function layOut(
               : packBlocks(restItems, options.maxWidth + pad);
     const positions: PackedItem[] = new Array(towers.length);
     const frontDepth = front.length ? Math.max(...front.map((i) => sizes[i].depth)) : 0;
+    // Corridor in front of and behind the row only; one free cell between two portals
+    const portalWidth = (i: number) => towers[i].width + 1;
     rest.forEach((i, k) => (positions[i] = { ...restPacked.positions[k], y: restPacked.positions[k].y + frontDepth }));
     // Portals side by side in one tight row, in the order of the blocks they feed
     const wantX = (i: number) => {
@@ -1292,8 +1294,8 @@ function layOut(
     };
     let cursor = 0;
     for (const i of [...front].sort((a, b) => wantX(a) - wantX(b))) {
-        positions[i] = { x: cursor, y: 0, rot: 0 };
-        cursor += sizes[i].width;
+        positions[i] = { x: cursor - (cursor > 0 ? corridor : 0), y: 0, rot: 0 };
+        cursor += cursor > 0 ? portalWidth(i) : sizes[i].width - corridor + 1;
     }
     const packed = { positions };
     const blockPlacements: Placement[] = [];

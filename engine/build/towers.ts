@@ -62,13 +62,21 @@ const HEIGHT_COST = 2;
  */
 function blockedEnds(placements: Placement[]): number {
     const occupied = new Set<string>();
-    for (const p of placements) for (const c of placementCells(p)) occupied.add(`${c.x},${c.y},${c.z}`);
+    // Highest cell over each spot that a belt can't pass (lab stands let belts through)
+    const above = new Map<string, number>();
+    for (const p of placements)
+        for (const c of placementCells(p)) {
+            occupied.add(`${c.x},${c.y},${c.z}`);
+            if (p.id !== "frame-single") above.set(`${c.x},${c.y}`, Math.max(above.get(`${c.x},${c.y}`) ?? -1, c.z));
+        }
     const shaftFree = (x: number, y: number, z: number) => {
         for (let k = 0; k <= z; k++) if (occupied.has(`${x},${y},${k}`)) return false;
         return true;
     };
     return findLaneEnds(placements).filter(({ port: [x, y, z] }) => {
         if (occupied.has(`${x},${y},${z}`)) return true;
+        // Nothing but lab stands over the cell in front of a lane end: the belt comes in there
+        if ((above.get(`${x},${y}`) ?? -1) > z) return true;
         if (z === 0) return false;
         return ![[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => shaftFree(x + ox, y + oy, z - 1));
     }).length;

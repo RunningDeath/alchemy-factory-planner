@@ -622,7 +622,10 @@ function routeOnce(placements: Placement[], options: RouterOptions, priority: st
     function prioritySplitter(exit: LaneEnd, itemName: string) {
         const dir = exit.dir;
         const cells: Cell[] = [exit.port, add(exit.port, dir)].flatMap((c) => [c, [c[0], c[1], c[2] + 1] as Cell]);
-        const free = cells.every((c) => inBounds(c) && !nodes.has(keyOf(c)) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0));
+        // Not in the way of other lane ends: the cells in front of them stay free for their belts
+        const own = new Set([keyOf(exit.port), keyOf(approach(exit))]);
+        const othersEnds = new Set(ends.filter((e) => e !== exit).flatMap((e) => [keyOf(e.port), keyOf(approach(e))]));
+        const free = cells.every((c) => inBounds(c) && !nodes.has(keyOf(c)) && (own.has(keyOf(c)) || !othersEnds.has(keyOf(c))) && (occupancy.get(keyOf(c)) ?? []).every((o) => (o.layers & 7) === 0));
         if (!free) return null;
         const xs = cells.map((c) => c[0]);
         const ys = cells.map((c) => c[1]);
