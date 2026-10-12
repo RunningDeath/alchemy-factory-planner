@@ -30,7 +30,7 @@ export interface Placement {
     laneEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
     /** Fluid this building takes in or gives out through its pipe ports */
     pipeEnd?: { kind: "in" | "out"; items: { itemName: string; rate: number }[] };
-    /** Filters: the item sent to the first (lower) output; everything else takes the second */
+    /** Filters: the item sent to the lower output (tall filter) or the side output (flat filter); everything else takes the other */
     filterItem?: string;
     /** Purchasing portals: the item bought */
     supplyItem?: string;

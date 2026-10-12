@@ -139,7 +139,9 @@ export function expandPairs(placements: Placement[]): Placement[] {
     return placements.flatMap((p) => {
         const pair = p.nodeKey ? pairs.get(p.nodeKey) : undefined;
         const fp = getFootprint(p.id);
-        if (!pair || !fp || !p.id.startsWith(PAIR_PREFIX)) return [p];
+        // Lane belts of the pair belong to its second machine
+        if (pair && !p.id.startsWith(PAIR_PREFIX)) return [{ ...p, nodeKey: pair.second.nodeKey }];
+        if (!pair || !fp) return [p];
         return [pair.first, pair.second].map((m, k): Placement => {
             const own = getFootprint(m.deviceId)!;
             const size = m.rot % 2 === 0 ? own.size : { x: own.size.y, y: own.size.x };

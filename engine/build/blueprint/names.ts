@@ -8,6 +8,7 @@ import recipesData from "../../../data/recipes.json";
 import type { Item, Recipe } from "../../types";
 import type { Placement } from "../layout";
 import type { BuildingFootprint } from "../types";
+import { cauldronRecipeById } from "../../cauldron";
 
 const names = namesData as { recipes: Record<string, string>; seeds: Record<string, string>; items: Record<string, string>; activeCrafting: string[] };
 const recipeById = new Map((recipesData as unknown as Recipe[]).map((r) => [r.id, r]));
@@ -32,8 +33,11 @@ function recipeOf(nodeKey?: string): Recipe | undefined {
  * What a machine is set to in game: the recipe for machines where the player picks it
  * (grinders, crucibles and the like pick theirs from the input), the seed for a nursery
  */
-export function machineSettings(p: Placement, fp: BuildingFootprint): { recipeName?: string; seedName?: string } {
+export function machineSettings(p: Placement, fp: BuildingFootprint): { recipeName?: string; seedName?: string; cauldronFilters?: string[] } {
     if (fp.category !== "production") return {};
+    // A cauldron makes whatever its three inputs add up to: its filters take only the mix's ingredients
+    const mix = cauldronRecipeById(p.nodeKey?.split("-prod-")[1] ?? "");
+    if (mix) return { cauldronFilters: mix.inputs.flatMap((i) => Array<string>(i.count ?? 1).fill(gameItemName(i.id ?? i.name))) };
     const recipe = recipeOf(p.nodeKey);
     if (!recipe) return {};
     const machine = baseMachine(p.id);

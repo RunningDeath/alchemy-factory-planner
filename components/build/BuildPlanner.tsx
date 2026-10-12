@@ -5,6 +5,7 @@ import { cycleVariant, inferBeltItems, placeBuilding, placementsAt, removePlacem
 import { DEFAULT_MODULE_OPTIONS, moduleTooBig, type ModuleStep } from "../../engine/build/generator";
 import { buildOccupancy, placementIssues, portConnections, type LayoutIssue, type Placement } from "../../engine/build/layout";
 import { stepsFromReport } from "../../engine/build/module-steps";
+import { suggestModuleGroups } from "../../engine/build/module-groups";
 import { lockedBuildings } from "../../engine/build/unlocks";
 import type { BuildLayoutState } from "../../engine/types";
 import { BELT_COLORS, buildingName, carriedItem, itemColorMap } from "../../lib/buildCatalog";
@@ -132,8 +133,13 @@ export function BuildPlanner() {
         setTimeout(() => setMessage((m) => (m === text ? null : m)), 2500);
     };
 
-    const runGenerate = (opts: typeof options) => {
+    const runGenerate = (given: typeof options) => {
         if (!report || steps.length === 0) return;
+        // Modules made for another plan (the product isn't in any of them): suggest them anew
+        const finals = report.targets.map((t) => t.itemName);
+        const grouped = new Set((given.moduleGroups ?? []).flat());
+        const stale = given.modules && steps.some((st) => finals.includes(st.itemName) && !grouped.has(st.nodeKey));
+        const opts = stale ? { ...given, moduleGroups: suggestModuleGroups(steps, { finalProducts: finals, beltSpeed: report.beltSpeed }) } : given;
         const tooBig = moduleTooBig(steps);
         if (tooBig) {
             setMessage(

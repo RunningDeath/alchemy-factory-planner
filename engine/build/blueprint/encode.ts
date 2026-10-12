@@ -33,6 +33,8 @@ interface Record {
     filterName?: string;
     recipeName?: string;
     seedName?: string;
+    /** Cauldrons: the item each of its three input slots takes */
+    cauldronFilters?: string[];
     supplyName?: string;
 }
 
@@ -191,6 +193,7 @@ export function placementsToBody(placements: Placement[]): BlueprintBody {
         setProp(b, "RecipeName", r.recipeName ?? "None");
         setProp(b, "SeedName", r.seedName ?? "None");
         setProp(b, "SupplyName", r.supplyName ?? "None");
+        b.filter((p) => p.name === "CauldronFilterName").forEach((p, k) => (p.value = r.cauldronFilters?.[k] ?? "None"));
         setPath(b, ["RelativeGridGroup", "Pivot"], pivot);
         setPath(b, ["RelativeGridGroup", "GridArea"], area);
         const pkg = getProp<Property[]>(b, "building");

@@ -628,8 +628,11 @@ function buildTier(
                 const placed: Placement = filter ? { ...base, ...filter } : { ...base, id: "filter-vert", x: laneX, y: yEnd + 1, z, rot: rotFor("left", "up") };
                 lifts.push(placed);
                 const outs = placementPorts(placed).filter((q) => q.dir === "out");
+                // The filtered item takes the lower output of the tall filter, the side output of the
+                // flat one (the other output runs straight on); checked against player blueprints
+                const filtered = placed.id === "filter-vert" ? 0 : 1;
                 for (const [k, out] of [first, second].entries()) {
-                    const port = outs[k];
+                    const port = outs[k === 0 ? filtered : 1 - filtered];
                     const face = port.face as Side;
                     const [tx, ty] = SIDE_OFFSET[face];
                     const piece = beltPieceFor([oppositeSide(face)], [face])!;
