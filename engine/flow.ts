@@ -72,7 +72,10 @@ export function simulateFlow(nodes: FlowNode[], edges: FlowEdge[], targets: Flow
     const realized = new Map<string, number>();
     const inputLimited = new Set<string>();
     const visiting = new Set<string>();
-    // Edges that close a cycle are treated as fully supplied
+    // Edges that close a cycle are treated as fully supplied. Approximate: where the cycle is
+    // cut depends on the order nodes are visited, and the node behind the cut edge is credited
+    // its full demand even when its supplier in the cycle makes less (inputLimited doesn't
+    // catch that). Fine for LP plans, which rarely loop except fuel/fertilizer self-supply
     const backEdges = new Set<string>();
 
     const allocated = (e: FlowEdge): number => {
@@ -104,7 +107,9 @@ export function simulateFlow(nodes: FlowNode[], edges: FlowEdge[], targets: Flow
 
         const potential = node.demand * supplyFactor;
         const value = Math.max(0, Math.min(node.capacity, potential));
-        if (potential < node.capacity - RATE_EPSILON) inputLimited.add(key);
+        // Input-limited only when the inputs keep it below what it should make: a rounded-up
+        // node making exactly its demand from full supply is demand-limited, not input-limited
+        if (potential < Math.min(node.capacity, node.demand) - RATE_EPSILON) inputLimited.add(key);
         realized.set(key, value);
         return value;
     }

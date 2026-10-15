@@ -229,10 +229,13 @@ export function analyzeNode(
   const primaryRate = perMachineOutputs.find((o) => o.itemName === node.itemName)?.perMachineRate ?? 0;
   const build =
     rounding.mode !== "exact" && node.deviceCount > RATE_EPSILON && primaryRate > RATE_EPSILON
-      ? roundBuild(node.rate, node.deviceCount, primaryRate, beltSpeed, rounding.mode, splitLines)
+      ? roundBuild(node.rate, node.deviceCount, primaryRate, isFluid ? Infinity : beltSpeed, rounding.mode, splitLines) // pipes have no cap
       : undefined;
 
-  const output = beltUtilization(build ? build.actualRate : node.rate, beltSpeed, {
+  // Without parallel lines the belt is judged by what should flow over it: the built output is
+  // capped at one belt, so a planned flow over that would otherwise read as fitting
+  const built = build ? build.actualRate : node.rate;
+  const output = beltUtilization(splitLines || isFluid ? built : Math.max(built, node.rate), beltSpeed, {
     isFluid,
     parallelLines: active,
   });
@@ -319,7 +322,10 @@ export function analyzeNode(
 function applyRealized(info: NodeBeltInfo, realized: number, inputLimited: boolean, beltSpeed: number) {
   info.realizedRate = realized;
   info.inputLimited = inputLimited;
-  const output = beltUtilization(realized, beltSpeed, { isFluid: info.isFluid, parallelLines: info.parallelLines });
+  // Without parallel lines: judged by the larger of what is made and what is planned (what is
+  // made is capped at one belt); with them the line plan shows the split
+  const judged = info.isFluid || info.parallelLines ? realized : Math.max(realized, info.demandRate);
+  const output = beltUtilization(judged, beltSpeed, { isFluid: info.isFluid, parallelLines: info.parallelLines });
   if (info.linePlan) {
     // Lines are physical: keep the built line count, show how full each one actually runs
     info.linePlan = { ...info.linePlan, ratePerLine: realized / info.linePlan.lines };

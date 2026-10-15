@@ -45,7 +45,8 @@ export function collectPlanGraph(rootNodes: ProductionNode[]): PlanGraph {
 
     const addEdgeRate = (key: string, rate: number) => edgeRates.set(key, (edgeRates.get(key) || 0) + rate);
 
-    function traverse(node: ProductionNode, parentName?: string, parent?: ProductionNode) {
+    /** `viaReference`: reached through a fuel/fertilizer reference, which recorded the edge already */
+    function traverse(node: ProductionNode, parentName?: string, parent?: ProductionNode, viaReference = false) {
         // Use explicit ID if available to prevent merging of Source vs Production nodes
         const key = nodeKeyOf(node);
 
@@ -58,7 +59,7 @@ export function collectPlanGraph(rootNodes: ProductionNode[]): PlanGraph {
             // Only traverse inputs once per key to avoid duplicate traversals
             if (!traversedConsumptionKeys.has(key)) {
                 traversedConsumptionKeys.add(key);
-                node.inputs.forEach((input) => traverse(input, parentName));
+                node.inputs.forEach((input) => traverse(input, parentName, undefined, true));
             }
             return;
         }
@@ -66,8 +67,10 @@ export function collectPlanGraph(rootNodes: ProductionNode[]): PlanGraph {
         // Cycle detection: if we're already visiting this node in current path, stop
         if (visiting.has(key)) return;
 
-        // Record Relationship & Rate for production nodes (skip if already traversed as consumption ref)
-        if (parentName && !traversedConsumptionKeys.has(key)) {
+        // Record Relationship & Rate for production nodes. Not when reached through a reference
+        // (it recorded its own edge); an item that is both fuel/fertilizer and a regular input
+        // still gets its regular edge, whichever path comes first
+        if (parentName && !viaReference) {
             // Prefer the consumer's recorded share over the producer's gross rate
             addEdgeRate(edgeKey(key, parentName), parent?.inputRates?.[key] ?? node.rate);
         }

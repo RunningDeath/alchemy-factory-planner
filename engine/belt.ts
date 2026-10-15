@@ -127,15 +127,14 @@ export function roundBuild(
     lines = parallelLines ? Math.max(1, linesNeeded(demandRate, beltSpeed)) : 1;
     producersPerLine = Math.max(1, Math.ceil(exactMachines / lines - RATE_EPSILON));
     machines = lines * producersPerLine;
-    actualRate = parallelLines
-      ? lines * Math.min(producersPerLine * perMachineRate, beltSpeed)
-      : machines * perMachineRate;
+    // One line carries at most one belt, with or without parallel lines
+    actualRate = lines * Math.min(producersPerLine * perMachineRate, beltSpeed);
   } else {
     machines = Math.max(1, Math.floor(exactMachines + RATE_EPSILON));
     const raw = machines * perMachineRate;
     lines = parallelLines ? Math.max(1, linesNeeded(raw, beltSpeed)) : 1;
     producersPerLine = Math.ceil(machines / lines - RATE_EPSILON);
-    actualRate = parallelLines ? Math.min(raw, lines * beltSpeed) : raw;
+    actualRate = Math.min(raw, lines * beltSpeed);
   }
 
   return {
@@ -188,21 +187,3 @@ export function checkMachineFlow(
   };
 }
 
-/**
- * Output of one nursery in items/min:
- * min(belt speed, fertilizer V/s ÷ plant V per item × 60 × factory multiplier).
- * `fertilizerMultiplier` (Fertilizer Efficiency) raises the nutrients per fertilizer item, not the
- * growth speed: it doesn't change the output.
- */
-export function nurseryOutputPerMachine(
-  fertilizerNutrientsPerSecond: number,
-  plantNutrientsPerItem: number,
-  speedMultiplier: number,
-  beltSpeed: number,
-  fertilizerMultiplier = 1,
-): number {
-  const uncapped =
-    (fertilizerNutrientsPerSecond / plantNutrientsPerItem) * 60 * speedMultiplier;
-  void fertilizerMultiplier;
-  return Math.min(beltSpeed, uncapped);
-}

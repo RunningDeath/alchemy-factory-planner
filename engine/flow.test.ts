@@ -5,6 +5,17 @@ const node = (key: string, demand: number, capacity = demand, isRaw = false): Fl
 const edge = (source: string, target: string, demand: number): FlowEdge => ({ key: `${source}>${target}`, source, target, demand });
 
 describe("simulateFlow", () => {
+  test("a rounded-up node making exactly its demand from full supply is not input-limited", () => {
+    // Its supplier delivers exactly the 100 it needs; it could make 120, demand is 100
+    const r = simulateFlow(
+      [node("ore", 100), node("plate", 100, 120)],
+      [edge("ore", "plate", 100)],
+      [{ source: "plate", demand: 100 }],
+    );
+    expect(r.realized.get("plate")).toBeCloseTo(100, 6);
+    expect(r.inputLimited.size).toBe(0);
+  });
+
   test("exact plan delivers exactly the target", () => {
     const r = simulateFlow(
       [node("ore", 100, Infinity, true), node("plate", 100), node("gear", 50)],
