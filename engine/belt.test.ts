@@ -4,7 +4,6 @@ import {
   checkMachineFlow,
   consumersPerBelt,
   linesNeeded,
-  nurseryOutputPerMachine,
   planParallelLines,
   roundBuild,
 } from "./belt";
@@ -104,10 +103,11 @@ describe("roundBuild", () => {
     expect(b.actualRate).toBeCloseTo(1320, 6);
   });
 
-  test("round up without parallel lines: ceil(machines)", () => {
+  test("round up without parallel lines: ceil(machines), output capped at one belt", () => {
+    // 23 grinders could make 1,265/min, but a single line carries one belt (165/min)
     const b = roundBuild(1260, grinders, 55, 165, "up", false);
     expect(b.machines).toBe(23);
-    expect(b.actualRate).toBeCloseTo(1265, 6);
+    expect(b.actualRate).toBeCloseTo(165, 6);
   });
 
   test("round down grinders: 22 × 55 = 1,210/min over 8 lines", () => {
@@ -181,14 +181,13 @@ describe("per-input belt cap", () => {
   });
 });
 
-describe("nurseryOutputPerMachine", () => {
-  test("capped at belt speed", () => {
-    // Growth potion (2160 V/s) on flax (24 V) at Factory 7: 14,850/min uncapped
-    expect(nurseryOutputPerMachine(2160, 24, 2.75, 165)).toBe(165);
-  });
 
-  test("uncapped when fertilizer is the bottleneck", () => {
-    // Basic fertilizer (12 V/s) on sage (36 V) at Factory 0: 20/min
-    expect(nurseryOutputPerMachine(12, 36, 1, 60)).toBeCloseTo(20, 5);
+describe("roundBuild without parallel lines", () => {
+  test("round up: a single line never reports more than one belt, so the shortfall shows", () => {
+    // 1,260/min planned on one 165/min line: the line delivers 165, not 23 × 55 = 1,265
+    const b = roundBuild(1260, 22.9, 55, 165, "up", false);
+    expect(b.lines).toBe(1);
+    expect(b.actualRate).toBeCloseTo(165, 6);
+    expect(b.actualRate - 1260).toBeLessThan(0);
   });
 });
